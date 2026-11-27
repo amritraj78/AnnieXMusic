@@ -1,7 +1,10 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import json
 import os
 import time
+from pathlib import Path
+from typing import Dict, Optional, Tuple
 
 try:
     from AnnieXMedia.logging import LOGGER
@@ -12,68 +15,166 @@ except Exception:
 
 _start_time = time.time()
 _server = None
+_WEB_DIR = Path(__file__).resolve().parent.parent / "assets" / "web"
+_MAX_BODY_BYTES = 65536
+
+_STATUS_MAP = {
+    200: "200 OK",
+    400: "400 Bad Request",
+    401: "401 Unauthorized",
+    403: "403 Forbidden",
+    404: "404 Not Found",
+    405: "405 Method Not Allowed",
+    413: "413 Payload Too Large",
+    500: "500 Internal Server Error",
+    502: "502 Bad Gateway",
+    503: "503 Service Unavailable",
+}
+
+
+def _load_web_asset(filename: str) -> Optional[bytes]:
+    asset = (_WEB_DIR / filename).resolve()
+    if asset.parent != _WEB_DIR.resolve() or not asset.is_file():
+        return None
+    try:
+        return asset.read_bytes()
+    except OSError:
+        return None
+
+
+async def _read_http_request(
+    reader: asyncio.StreamReader,
+) -> Optional[Tuple[str, str, str, Dict[str, str], bytes]]:
+    try:
+        line = await asyncio.wait_for(reader.readline(), timeout=5.0)
+    except (asyncio.TimeoutError, asyncio.LimitOverrunError):
+        return None
+    if not line:
+        return None
+
+    parts = line.decode("utf-8", errors="ignore").strip().split()
+    if len(parts) < 2:
+        return None
+    method = parts[0].upper()
+    raw_target = parts[1]
+    if "?" in raw_target:
+        path, query_str = raw_target.split("?", 1)
+    else:
+        path, query_str = raw_target, ""
+
+    headers: Dict[str, str] = {}
+    for _ in range(64):
+        try:
+            header_line = await asyncio.wait_for(reader.readline(), timeout=2.0)
+        except (asyncio.TimeoutError, asyncio.LimitOverrunError):
+            return None
+        if not header_line or header_line in (b"\r\n", b"\n", b""):
+            break
+        decoded = header_line.decode("utf-8", errors="ignore").strip()
+        if ":" in decoded:
+            k, v = decoded.split(":", 1)
+            headers[k.strip().lower()] = v.strip()
+
+    body = b""
+    if "content-length" in headers:
+        try:
+            content_len = int(headers["content-length"])
+        except ValueError:
+            content_len = -1
+        if content_len < 0 or content_len > _MAX_BODY_BYTES:
+            return method, "__TOO_LARGE__", query_str, headers, b""
+        if content_len > 0:
+            try:
+                body = await asyncio.wait_for(reader.readexactly(content_len), timeout=5.0)
+            except (asyncio.TimeoutError, asyncio.IncompleteReadError):
+                return None
+
+    return method, path, query_str, headers, body
+
+
+def _send_response_bytes(
+    status_code: int, content_type: str, body: bytes, method: str = "GET"
+) -> bytes:
+    status_text = _STATUS_MAP.get(status_code, f"{status_code} OK")
+    headers = (
+        f"HTTP/1.1 {status_text}\r\n"
+        f"Content-Type: {content_type}\r\n"
+        "X-Content-Type-Options: nosniff\r\n"
+        "Cache-Control: no-store\r\n"
+        "Connection: close\r\n"
+        f"Content-Length: {len(body)}\r\n\r\n"
+    ).encode("utf-8")
+    return headers if method == "HEAD" else headers + body
 
 
 async def _handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWriter):
     try:
-        try:
-            line = await asyncio.wait_for(reader.readline(), timeout=5.0)
-        except (asyncio.TimeoutError, asyncio.LimitOverrunError):
+        parsed = await _read_http_request(reader)
+        if not parsed:
             return
-        if not line:
-            return
+        method, path, query_str, headers, body_bytes = parsed
 
-        request_line = line.decode("utf-8", errors="ignore").strip()
-        parts = request_line.split()
-        method = parts[0].upper() if parts else "GET"
-        path = parts[1].split("?", 1)[0] if len(parts) > 1 else "/"
+        if path == "__TOO_LARGE__":
+            resp = _send_response_bytes(
+                413, "application/json; charset=utf-8", b'{"error":"Payload too large"}\n', method
+            )
+        elif method not in ("GET", "HEAD", "POST"):
+            resp = _send_response_bytes(
+                405, "application/json; charset=utf-8", b'{"error":"Method not allowed"}\n', method
+            )
+        elif path in ("/health", "/ping", "/status"):
+            uptime = int(time.time() - _start_time)
+            body = f'{{"status":"ok","service":"AnnieXMusic","uptime":"{uptime}s"}}\n'.encode("utf-8")
+            resp = _send_response_bytes(200, "application/json; charset=utf-8", body, method)
+        elif path == "/app":
+            asset = _load_web_asset("app.html")
+            if asset is None:
+                resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Mini App not found", method)
+            else:
+                resp = _send_response_bytes(200, "text/html; charset=utf-8", asset, method)
+        elif path == "/game":
+            asset = _load_web_asset("game.html")
+            if asset is None:
+                resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Game not found", method)
+            else:
+                resp = _send_response_bytes(200, "text/html; charset=utf-8", asset, method)
+        elif path.startswith("/api/"):
+            from AnnieXMedia.core.webapp_api import handle_api_request
 
-        # Read remaining headers with Slowloris & unbounded loop guards
-        for _ in range(64):
-            try:
-                header = await asyncio.wait_for(reader.readline(), timeout=2.0)
-            except (asyncio.TimeoutError, asyncio.LimitOverrunError):
-                return
-            if not header or header in (b"\r\n", b"\n", b""):
-                break
-
-        uptime = int(time.time() - _start_time)
-
-        if path in ("/health", "/ping", "/status"):
-            body = (
-                f'{{"status":"ok","service":"AnnieXMusic","uptime":"{uptime}s"}}\n'
-            ).encode("utf-8")
-            content_type = "application/json; charset=utf-8"
-        else:
+            code, payload = await handle_api_request(method, path, query_str, headers, body_bytes)
+            body = (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+            resp = _send_response_bytes(code, "application/json; charset=utf-8", body, method)
+        elif path == "/":
+            uptime = int(time.time() - _start_time)
             html = (
-                "<!DOCTYPE html><html><head><meta charset='utf-8'><title>AnnieXMusic</title>"
+                "<!DOCTYPE html><html><head><meta charset='utf-8'>"
+                "<meta name='viewport' content='width=device-width,initial-scale=1'>"
+                "<title>AnnieXMusic</title>"
                 "<style>body{font-family:system-ui,-apple-system,sans-serif;background:#0d1117;color:#c9d1d9;"
-                "display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}"
-                ".card{background:#161b22;padding:2.5rem;border-radius:12px;border:1px solid #30363d;"
-                "text-align:center;max-width:420px;box-shadow:0 8px 24px rgba(0,0,0,0.4);}"
-                "h1{color:#58a6ff;margin-bottom:0.5rem;font-size:1.6rem;}"
+                "display:flex;align-items:center;justify-content:center;min-height:100vh;margin:0;padding:16px;}"
+                ".card{background:#161b22;padding:2.2rem;border-radius:16px;border:1px solid #30363d;"
+                "text-align:center;max-width:440px;width:100%;box-shadow:0 8px 24px rgba(0,0,0,0.4);}"
+                "h1{color:#58a6ff;margin:0 0 0.6rem;font-size:1.6rem;}"
                 ".badge{display:inline-block;background:#238636;color:#fff;padding:4px 12px;border-radius:20px;font-size:0.85rem;margin-bottom:1rem;}"
-                "p{margin:0.5rem 0;color:#8b949e;}"
+                "p{margin:0.45rem 0;color:#8b949e;}"
+                ".btns{display:flex;gap:10px;justify-content:center;margin-top:1.4rem;flex-wrap:wrap;}"
+                ".btn{display:inline-block;padding:10px 18px;border-radius:10px;text-decoration:none;font-weight:600;color:#fff;background:#1f6feb;}"
+                ".btn.alt{background:#8957e5;}"
                 "</style></head><body><div class='card'>"
                 "<h1>AnnieXMusic Bot</h1>"
                 "<div class='badge'>Running &amp; Healthy</div>"
                 f"<p>Instance Uptime: <strong>{uptime}s</strong></p>"
-                "<p>Koyeb Deploy Status: <strong>Ready</strong></p>"
-                "</div></body></html>\n"
-            )
-            body = html.encode("utf-8")
-            content_type = "text/html; charset=utf-8"
+                "<p>Telegram Mini App &amp; Neon Arcade Ready</p>"
+                "<div class='btns'>"
+                "<a class='btn' href='/app'>🎵 Music Mini App</a>"
+                "<a class='btn alt' href='/game'>🎮 Neon Arcade</a>"
+                "</div></div></body></html>\n"
+            ).encode("utf-8")
+            resp = _send_response_bytes(200, "text/html; charset=utf-8", html, method)
+        else:
+            resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Not Found", method)
 
-        headers = (
-            b"HTTP/1.1 200 OK\r\n"
-            + f"Content-Type: {content_type}\r\n".encode("utf-8")
-            + b"X-Content-Type-Options: nosniff\r\n"
-            + b"Cache-Control: no-store\r\n"
-            + b"Connection: close\r\n"
-            + f"Content-Length: {len(body)}\r\n\r\n".encode("utf-8")
-        )
-
-        writer.write(headers if method == "HEAD" else headers + body)
+        writer.write(resp)
         await writer.drain()
     except Exception as e:
         log.debug(f"Web server request handling error: {e}")

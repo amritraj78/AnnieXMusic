@@ -1,0 +1,546 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>AnnieXMusic Mini App</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  :root {
+    --bg: #090b12;
+    --surface: #121726;
+    --surface2: #192136;
+    --border: rgba(130, 160, 255, 0.16);
+    --text: #eef2ff;
+    --muted: #93a3c7;
+    --accent: #6c63ff;
+    --accent2: #00d4ff;
+    --ok: #10b981;
+    --warn: #f59e0b;
+    --danger: #ef4444;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  body {
+    margin: 0;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Inter, sans-serif;
+    background: radial-gradient(circle at top right, rgba(108, 99, 255, 0.18), transparent 45%),
+                radial-gradient(circle at bottom left, rgba(0, 212, 255, 0.12), transparent 40%), var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    padding-bottom: 78px;
+  }
+  .wrap { max-width: 680px; margin: 0 auto; padding: 14px; }
+  .topbar {
+    display: flex; align-items: center; justify-content: space-between;
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 12px 14px; margin-bottom: 12px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; }
+  .logo {
+    width: 38px; height: 38px; border-radius: 12px;
+    background: linear-gradient(135deg, var(--accent), var(--accent2));
+    display: grid; place-items: center; font-size: 19px; font-weight: 700;
+  }
+  .brand h1 { margin: 0; font-size: 1rem; line-height: 1.2; }
+  .sub { font-size: 0.74rem; color: var(--muted); display: flex; align-items: center; gap: 6px; margin-top: 2px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--ok); display: inline-block; box-shadow: 0 0 8px var(--ok); }
+  .pill {
+    background: var(--surface2); border: 1px solid var(--border); border-radius: 999px;
+    padding: 5px 10px; font-size: 0.75rem; color: var(--text); max-width: 150px;
+    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  }
+  .card {
+    background: var(--surface); border: 1px solid var(--border);
+    border-radius: 16px; padding: 14px; margin-bottom: 12px;
+  }
+  .sec-title {
+    font-size: 0.8rem; text-transform: uppercase; letter-spacing: 0.06em;
+    color: var(--muted); margin: 0 0 10px; font-weight: 700;
+  }
+  .banner {
+    background: linear-gradient(135deg, rgba(108, 99, 255, 0.18), rgba(0, 212, 255, 0.12));
+    border: 1px solid rgba(108, 99, 255, 0.35); border-radius: 14px; padding: 12px; margin-bottom: 12px;
+    font-size: 0.85rem; line-height: 1.4;
+  }
+  .now-playing { display: flex; gap: 12px; align-items: center; }
+  .thumb {
+    width: 76px; height: 76px; border-radius: 12px; object-fit: cover;
+    background: var(--surface2); flex-shrink: 0; border: 1px solid var(--border);
+  }
+  .np-meta { flex: 1; min-width: 0; }
+  .np-title { font-weight: 700; font-size: 0.96rem; margin-bottom: 4px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .np-sub { font-size: 0.78rem; color: var(--muted); margin-bottom: 6px; }
+  .badge {
+    display: inline-block; font-size: 0.7rem; padding: 3px 8px; border-radius: 999px;
+    font-weight: 600; background: rgba(16, 185, 129, 0.15); color: #34d399;
+  }
+  .badge.paused { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
+  .controls { display: grid; grid-template-columns: repeat(4, 1fr); gap: 8px; margin-top: 12px; }
+  button {
+    font: inherit; border: none; border-radius: 12px; padding: 10px 8px;
+    cursor: pointer; font-weight: 600; color: var(--text); background: var(--surface2);
+    border: 1px solid var(--border); transition: transform .08s ease, opacity .15s ease;
+  }
+  button:active { transform: scale(0.96); }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  button.primary { background: linear-gradient(135deg, var(--accent), #5246e5); border-color: transparent; }
+  button.cyan { background: linear-gradient(135deg, #0284c7, var(--accent2)); border-color: transparent; color: #04101f; }
+  button.danger { background: rgba(239, 68, 68, 0.18); border-color: rgba(239, 68, 68, 0.4); color: #fca5a5; }
+  .chips { display: flex; gap: 7px; flex-wrap: wrap; margin-bottom: 10px; }
+  .chip {
+    padding: 6px 11px; border-radius: 999px; font-size: 0.78rem; background: var(--surface2);
+    border: 1px solid var(--border); color: var(--muted); cursor: pointer;
+  }
+  .chip.active { background: var(--accent); color: #fff; border-color: transparent; }
+  .q-item {
+    display: flex; justify-content: space-between; align-items: center; gap: 8px;
+    padding: 9px 10px; background: var(--surface2); border-radius: 11px; margin-bottom: 7px; font-size: 0.84rem;
+  }
+  .q-item-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; flex: 1; }
+  .input-row { display: flex; gap: 8px; margin-bottom: 10px; }
+  input, select {
+    width: 100%; background: var(--surface2); color: var(--text); border: 1px solid var(--border);
+    border-radius: 12px; padding: 10px 12px; font: inherit; outline: none;
+  }
+  input:focus, select:focus { border-color: var(--accent2); }
+  .res-card {
+    display: flex; gap: 10px; align-items: center; padding: 10px;
+    background: var(--surface2); border-radius: 12px; margin-bottom: 8px; border: 1px solid var(--border);
+  }
+  .res-card img { width: 64px; height: 48px; border-radius: 8px; object-fit: cover; flex-shrink: 0; }
+  .res-meta { flex: 1; min-width: 0; }
+  .res-title { font-size: 0.85rem; font-weight: 600; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+  .res-info { font-size: 0.73rem; color: var(--muted); margin-top: 3px; }
+  .res-actions { display: flex; flex-direction: column; gap: 5px; flex-shrink: 0; }
+  .res-actions button { padding: 6px 10px; font-size: 0.74rem; }
+  .stats-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 10px; }
+  .stat-box { background: var(--surface2); border: 1px solid var(--border); border-radius: 14px; padding: 13px; }
+  .stat-val { font-size: 1.35rem; font-weight: 800; color: var(--accent2); }
+  .stat-lbl { font-size: 0.76rem; color: var(--muted); margin-top: 3px; }
+  .arcade-grid { display: grid; grid-template-columns: 1fr; gap: 10px; }
+  .game-card {
+    display: flex; align-items: center; justify-content: space-between; gap: 10px;
+    padding: 13px; border-radius: 14px; background: var(--surface2); border: 1px solid var(--border);
+  }
+  .nav {
+    position: fixed; bottom: 0; left: 0; right: 0; height: 64px;
+    background: rgba(14, 18, 32, 0.96); backdrop-filter: blur(12px);
+    border-top: 1px solid var(--border); display: grid; grid-template-columns: repeat(4, 1fr);
+    max-width: 680px; margin: 0 auto;
+  }
+  .nav button {
+    border: none; background: transparent; border-radius: 0; color: var(--muted);
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 3px; font-size: 0.71rem; padding: 4px;
+  }
+  .nav button.active { color: var(--accent2); }
+  .nav span.ico { font-size: 1.2rem; }
+  .tab { display: none; }
+  .tab.active { display: block; }
+  .toast {
+    position: fixed; top: 14px; left: 50%; transform: translateX(-50%);
+    background: #1e293b; border: 1px solid var(--accent2); color: #fff;
+    padding: 9px 14px; border-radius: 999px; font-size: 0.82rem; z-index: 999;
+    display: none; box-shadow: 0 8px 24px rgba(0,0,0,0.45);
+  }
+  .empty { text-align: center; color: var(--muted); padding: 20px 10px; font-size: 0.88rem; }
+</style>
+</head>
+<body>
+<div id="toast" class="toast"></div>
+<div class="wrap">
+  <div class="topbar">
+    <div class="brand">
+      <div class="logo">🎵</div>
+      <div>
+        <h1 id="botName">AnnieXMusic</h1>
+        <div class="sub"><span class="dot"></span><span id="statusTxt">Live Web App</span></div>
+      </div>
+    </div>
+    <div class="pill" id="userPill">Guest</div>
+  </div>
+
+  <div id="authNotice" class="banner" style="display:none;">
+    Opened outside Telegram. Open inside <strong id="botUserRef">@ritulavbot</strong> to authenticate Voice Chat controls, or jump straight into the <strong>Neon Arcade</strong>!
+  </div>
+
+  <!-- TAB 1: PLAYER -->
+  <section id="tab-player" class="tab active">
+    <div class="card">
+      <div class="sec-title">Voice Chat Sessions</div>
+      <div id="sessionChips" class="chips"></div>
+      <div id="playerArea"><div class="empty">Checking active Voice Chats…</div></div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Up Next Queue</div>
+      <div id="queueList"><div class="empty">Queue is empty. Search a song in the Search tab!</div></div>
+    </div>
+  </section>
+
+  <!-- TAB 2: SEARCH & PLAY -->
+  <section id="tab-search" class="tab">
+    <div class="card">
+      <div class="sec-title">Target Group Voice Chat</div>
+      <div class="input-row">
+        <select id="targetSelect"><option value="">Select group or enter ID below</option></select>
+      </div>
+      <div class="input-row">
+        <input id="manualChatId" placeholder="Group ID (e.g. -1004478038866) or @groupusername">
+      </div>
+      <div class="sec-title" style="margin-top:8px;">Search Song / YouTube URL</div>
+      <div class="input-row">
+        <input id="searchInput" placeholder="Type song name (e.g. Tum Hi Ho, Dilbar)...">
+        <button class="primary" style="width:92px;" onclick="runSearch()">Search</button>
+      </div>
+      <div class="chips">
+        <span class="chip" onclick="quickSearch('Arijit Singh Hits')">Arijit Hits</span>
+        <span class="chip" onclick="quickSearch('Punjabi Latest Songs')">Punjabi</span>
+        <span class="chip" onclick="quickSearch('Lofi Hindi Chill')">Lofi</span>
+        <span class="chip" onclick="quickSearch('Alan Walker Faded')">EDM</span>
+      </div>
+      <div id="searchResults"><div class="empty">Search any song to stream directly into your Voice Chat.</div></div>
+    </div>
+  </section>
+
+  <!-- TAB 3: ARCADE -->
+  <section id="tab-games" class="tab">
+    <div class="card">
+      <div class="sec-title">3-in-1 Neon Music Arcade</div>
+      <div class="arcade-grid">
+        <div class="game-card">
+          <div>
+            <div style="font-weight:700;">🎹 Beat Tiles</div>
+            <div style="font-size:0.78rem;color:var(--muted);">4-lane rhythm tapper with combo beats</div>
+          </div>
+          <button class="cyan" onclick="openGame('beats')">Play</button>
+        </div>
+        <div class="game-card">
+          <div>
+            <div style="font-weight:700;">🐍 Neon Snake</div>
+            <div style="font-size:0.78rem;color:var(--muted);">Arcade snake with glowing power notes</div>
+          </div>
+          <button class="cyan" onclick="openGame('snake')">Play</button>
+        </div>
+        <div class="game-card">
+          <div>
+            <div style="font-weight:700;">⚡ Flappy Beat</div>
+            <div style="font-size:0.78rem;color:var(--muted);">Dodge equalizer bars to the rhythm</div>
+          </div>
+          <button class="cyan" onclick="openGame('flappy')">Play</button>
+        </div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Top Arcade Scores</div>
+      <div class="chips">
+        <span class="chip active" id="lbChip-beats" onclick="loadMiniLB('beats')">Beat Tiles</span>
+        <span class="chip" id="lbChip-snake" onclick="loadMiniLB('snake')">Neon Snake</span>
+        <span class="chip" id="lbChip-flappy" onclick="loadMiniLB('flappy')">Flappy Beat</span>
+      </div>
+      <div id="miniLB"><div class="empty">Loading scores…</div></div>
+    </div>
+  </section>
+
+  <!-- TAB 4: STATS -->
+  <section id="tab-stats" class="tab">
+    <div class="card">
+      <div class="sec-title">Live Server Stats</div>
+      <div class="stats-grid">
+        <div class="stat-box"><div class="stat-val" id="stUptime">-</div><div class="stat-lbl">Uptime</div></div>
+        <div class="stat-box"><div class="stat-val" id="stCalls">-</div><div class="stat-lbl">Active Voice Chats</div></div>
+        <div class="stat-box"><div class="stat-val" id="stChats">-</div><div class="stat-lbl">Served Groups</div></div>
+        <div class="stat-box"><div class="stat-val" id="stUsers">-</div><div class="stat-lbl">Served Users</div></div>
+      </div>
+    </div>
+    <div class="card">
+      <div class="sec-title">Community & Support</div>
+      <div class="controls" style="grid-template-columns: repeat(3, 1fr); margin-top:4px;">
+        <button onclick="openTgLink(links.channel)">📢 Channel</button>
+        <button onclick="openTgLink(links.chat)">💬 Support</button>
+        <button onclick="openTgLink(links.owner)">👑 Owner</button>
+      </div>
+    </div>
+  </section>
+</div>
+
+<nav class="nav">
+  <button class="active" id="nav-player" onclick="switchTab('player')"><span class="ico">🎛️</span>Player</button>
+  <button id="nav-search" onclick="switchTab('search')"><span class="ico">🔍</span>Play</button>
+  <button id="nav-games" onclick="switchTab('games')"><span class="ico">🎮</span>Arcade</button>
+  <button id="nav-stats" onclick="switchTab('stats')"><span class="ico">📊</span>Stats</button>
+</nav>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+const initData = tg ? (tg.initData || "") : "";
+let state = { sessions: [], selectedChatId: null, lbGame: "beats", searchTracks: [] };
+let links = { channel: "https://t.me/privatethink", chat: "https://t.me/amrit_feel", owner: "https://t.me/ex_amrit" };
+
+function esc(s) {
+  return String(s == null ? "" : s)
+    .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+}
+
+function showToast(msg) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.display = "block";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.display = "none"; }, 2600);
+}
+
+function haptic(kind = "light") {
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(kind); } catch (e) {}
+}
+
+function openTgLink(url) {
+  if (!url) return;
+  if (tg && tg.openTelegramLink && url.startsWith("https://t.me/")) tg.openTelegramLink(url);
+  else window.open(url, "_blank");
+}
+
+function openGame(gameName) {
+  haptic("medium");
+  window.location.href = "/game?game=" + encodeURIComponent(gameName || "beats");
+}
+
+function switchTab(name) {
+  haptic("light");
+  ["player", "search", "games", "stats"].forEach(t => {
+    document.getElementById("tab-" + t).classList.toggle("active", t === name);
+    document.getElementById("nav-" + t).classList.toggle("active", t === name);
+  });
+  if (name === "games") loadMiniLB(state.lbGame);
+}
+
+async function api(path, opts = {}) {
+  const headers = Object.assign({ "Content-Type": "application/json" }, opts.headers || {});
+  if (initData) headers["X-Telegram-Init-Data"] = initData;
+  const r = await fetch(path, Object.assign({}, opts, { headers }));
+  const data = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(data.error || ("HTTP " + r.status));
+  return data;
+}
+
+function fmtUptime(sec) {
+  const d = Math.floor(sec / 86400), h = Math.floor((sec % 86400) / 3600), m = Math.floor((sec % 3600) / 60);
+  if (d > 0) return d + "d " + h + "h";
+  if (h > 0) return h + "h " + m + "m";
+  return m + "m " + (sec % 60) + "s";
+}
+
+function renderOverview(data) {
+  if (data.bot) {
+    document.getElementById("botName").textContent = data.bot.name || "AnnieXMusic";
+    document.getElementById("botUserRef").textContent = "@" + (data.bot.username || "ritulavbot");
+    links.channel = data.bot.support_channel || links.channel;
+    links.chat = data.bot.support_chat || links.chat;
+    links.owner = data.bot.owner_username ? ("https://t.me/" + data.bot.owner_username) : links.owner;
+  }
+  document.getElementById("authNotice").style.display = data.authenticated ? "none" : "block";
+  if (data.user) {
+    document.getElementById("userPill").textContent = data.user.name + (data.user.is_sudo ? " 👑" : "");
+  }
+  if (data.stats) {
+    document.getElementById("stUptime").textContent = fmtUptime(data.stats.uptime_sec || 0);
+    document.getElementById("stCalls").textContent = data.stats.active_calls || 0;
+    document.getElementById("stChats").textContent = data.stats.served_chats || 0;
+    document.getElementById("stUsers").textContent = data.stats.served_users || 0;
+  }
+
+  state.sessions = data.sessions || [];
+  const sel = document.getElementById("targetSelect");
+  const prevSel = sel.value;
+  sel.innerHTML = '<option value="">Select a group…</option>' +
+    state.sessions.map(s => `<option value="${s.chat_id}">${esc(s.title)} (${s.active ? "Live VC" : "Idle"})</option>`).join("");
+  if (prevSel && state.sessions.some(s => String(s.chat_id) === prevSel)) sel.value = prevSel;
+  else if (state.sessions.length && !document.getElementById("manualChatId").value) sel.value = String(state.sessions[0].chat_id);
+
+  if (!state.selectedChatId || !state.sessions.some(s => s.chat_id === state.selectedChatId)) {
+    const activeFirst = state.sessions.find(s => s.active) || state.sessions[0];
+    state.selectedChatId = activeFirst ? activeFirst.chat_id : null;
+  }
+
+  const chipsEl = document.getElementById("sessionChips");
+  if (!state.sessions.length) {
+    chipsEl.innerHTML = "";
+    document.getElementById("playerArea").innerHTML =
+      `<div class="empty">${data.authenticated ? "No active Voice Chats visible for your account right now. Use the Play tab to start a song!" : "Open via Telegram bot Menu Button to view & control Voice Chats."}</div>`;
+    document.getElementById("queueList").innerHTML = '<div class="empty">Nothing queued yet.</div>';
+    return;
+  }
+
+  chipsEl.innerHTML = state.sessions.map(s =>
+    `<span class="chip ${s.chat_id === state.selectedChatId ? "active" : ""}" onclick="selectSession(${s.chat_id})">${esc(s.title)} ${s.active ? "🔊" : ""}</span>`
+  ).join("");
+
+  const cur = state.sessions.find(s => s.chat_id === state.selectedChatId);
+  if (!cur || !cur.active || !cur.current) {
+    document.getElementById("playerArea").innerHTML = '<div class="empty">Voice Chat is idle in this group. Open the <strong>Play</strong> tab to start streaming!</div>';
+    document.getElementById("queueList").innerHTML = '<div class="empty">Queue is empty.</div>';
+    return;
+  }
+
+  const t = cur.current;
+  const thumb = t.vidid && /^[a-zA-Z0-9_-]{11}$/.test(t.vidid)
+    ? `https://img.youtube.com/vi/${esc(t.vidid)}/hqdefault.jpg`
+    : "https://files.catbox.moe/veykzq.jpg";
+  const nextLoop = cur.loop === 0 ? 1 : (cur.loop === 1 ? 3 : 0);
+  const dis = cur.can_control ? "" : "disabled";
+
+  document.getElementById("playerArea").innerHTML = `
+    <div class="now-playing">
+      <img class="thumb" src="${thumb}" onerror="this.src='https://files.catbox.moe/veykzq.jpg'">
+      <div class="np-meta">
+        <div class="np-title">${esc(t.title)}</div>
+        <div class="np-sub">${esc(t.played)} / ${esc(t.duration)} • ${esc(t.streamtype.toUpperCase())}</div>
+        <span class="badge ${cur.playing ? "" : "paused"}">${cur.playing ? "▶ Playing" : "⏸ Paused"}</span>
+        ${cur.loop ? `<span class="badge" style="margin-left:5px;">🔁 Loop ${cur.loop}</span>` : ""}
+      </div>
+    </div>
+    <div class="controls">
+      <button class="primary" ${dis} onclick="sendControl('${cur.playing ? "pause" : "resume"}')">${cur.playing ? "⏸ Pause" : "▶ Resume"}</button>
+      <button ${dis} onclick="sendControl('skip')">⏭ Skip</button>
+      <button ${dis} onclick="sendControl('loop', ${nextLoop})">🔁 ${cur.loop ? "x" + cur.loop : "Off"}</button>
+      <button class="danger" ${dis} onclick="sendControl('stop')">⏹ Stop</button>
+    </div>
+    ${cur.can_control ? "" : '<div class="sub" style="margin-top:8px;">Admin rights required in this group to control playback.</div>'}
+  `;
+
+  const qEl = document.getElementById("queueList");
+  if (!cur.queue || !cur.queue.length) {
+    qEl.innerHTML = '<div class="empty">No upcoming tracks queued.</div>';
+  } else {
+    qEl.innerHTML = cur.queue.map((item, i) =>
+      `<div class="q-item"><div class="q-item-title">${i + 1}. ${esc(item.title)}</div><span style="color:var(--muted);font-size:0.76rem;">${esc(item.duration)}</span></div>`
+    ).join("");
+  }
+}
+
+function selectSession(cid) { state.selectedChatId = cid; refreshOverview(); }
+
+async function refreshOverview() {
+  try { renderOverview(await api("/api/overview")); }
+  catch (e) { console.error(e); }
+}
+
+async function sendControl(action, value = 0) {
+  haptic("medium");
+  try {
+    await api("/api/control", { method: "POST", body: JSON.stringify({ chat_id: state.selectedChatId, action, value }) });
+    showToast("Done: " + action);
+    await refreshOverview();
+  } catch (e) { showToast(e.message); }
+}
+
+function quickSearch(q) {
+  document.getElementById("searchInput").value = q;
+  runSearch();
+}
+
+async function runSearch() {
+  const q = document.getElementById("searchInput").value.trim();
+  if (q.length < 2) return showToast("Type at least 2 characters");
+  haptic("light");
+  const out = document.getElementById("searchResults");
+  out.innerHTML = '<div class="empty">Searching…</div>';
+  try {
+    const data = await api("/api/search?q=" + encodeURIComponent(q));
+    state.searchTracks = data.tracks || [];
+    if (!state.searchTracks.length) {
+      out.innerHTML = '<div class="empty">No results found.</div>';
+      return;
+    }
+    out.innerHTML = state.searchTracks.map((tr, idx) => `
+      <div class="res-card">
+        <img src="${esc(tr.thumb || 'https://files.catbox.moe/veykzq.jpg')}" loading="lazy">
+        <div class="res-meta">
+          <div class="res-title">${esc(tr.title)}</div>
+          <div class="res-info">${esc(tr.duration)} • ${esc(tr.channel)}</div>
+        </div>
+        <div class="res-actions">
+          <button class="primary" onclick="playTrackIdx(${idx}, false, this)">▶ Audio</button>
+          <button onclick="playTrackIdx(${idx}, true, this)">🎬 Video</button>
+        </div>
+      </div>
+    `).join("");
+  } catch (e) {
+    out.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+async function playTrackIdx(idx, video, btn) {
+  const tr = state.searchTracks[idx];
+  if (!tr) return;
+  const target = document.getElementById("manualChatId").value.trim() || document.getElementById("targetSelect").value;
+  if (!target) return showToast("Select a group or enter its Chat ID (-100...)");
+  haptic("medium");
+  const orig = btn.textContent;
+  btn.disabled = true; btn.textContent = "…";
+  try {
+    const res = await api("/api/play", {
+      method: "POST",
+      body: JSON.stringify({
+        chat_id: target,
+        query: tr.link,
+        vidid: tr.vidid,
+        title: tr.title,
+        duration: tr.duration,
+        thumb: tr.thumb,
+        video: !!video
+      }),
+    });
+    showToast((res.status === "queued" ? "Queued #" + res.position : "Now Playing") + ": " + res.title);
+    await refreshOverview();
+    switchTab("player");
+  } catch (e) {
+    showToast(e.message);
+  } finally {
+    btn.disabled = false; btn.textContent = orig;
+  }
+}
+
+async function loadMiniLB(game) {
+  state.lbGame = game;
+  ["beats", "snake", "flappy"].forEach(g => {
+    document.getElementById("lbChip-" + g).classList.toggle("active", g === game);
+  });
+  const el = document.getElementById("miniLB");
+  try {
+    const data = await api("/api/games/leaderboard?game=" + encodeURIComponent(game));
+    if (!data.scores || !data.scores.length) {
+      el.innerHTML = '<div class="empty">No scores recorded yet. Be the first!</div>';
+      return;
+    }
+    el.innerHTML = data.scores.slice(0, 5).map(r =>
+      `<div class="q-item"><div><strong>#${r.rank}</strong> ${esc(r.name)}</div><strong style="color:var(--accent2);">${r.score}</strong></div>`
+    ).join("");
+  } catch (e) {
+    el.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+document.getElementById("searchInput").addEventListener("keydown", e => {
+  if (e.key === "Enter") runSearch();
+});
+
+(function handleStartupRoute() {
+  const urlParams = new URLSearchParams(location.search);
+  const startParam = tg?.initDataUnsafe?.start_param || "";
+  const tab = urlParams.get("tab") || (["player", "search", "games", "stats"].includes(startParam) ? startParam : "");
+  if (tab) switchTab(tab);
+  if (startParam.startsWith("c_")) {
+    const cid = startParam.slice(2);
+    if (/^-?\d+$/.test(cid)) document.getElementById("manualChatId").value = cid;
+  }
+})();
+
+refreshOverview();
+setInterval(() => {
+  if (document.getElementById("tab-player").classList.contains("active")) refreshOverview();
+}, 4000);
+</script>
+</body>
+</html>

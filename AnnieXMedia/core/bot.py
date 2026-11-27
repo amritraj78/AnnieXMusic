@@ -2,6 +2,7 @@
 import sys
 from pyrogram import Client, errors
 from pyrogram.enums import ChatMemberStatus
+from pyrogram.types import MenuButtonWebApp, WebAppInfo
 
 import config
 from ..logging import LOGGER
@@ -54,5 +55,17 @@ class MusicBotClient(Client):
                 sys.exit()
         except Exception as e:
             LOGGER(__name__).warning(f"⚠️ Could not check admin status in log group: {e}")
+
+        if config.WEBAPP_URL.startswith("https://"):
+            try:
+                await self.set_chat_menu_button(
+                    menu_button=MenuButtonWebApp(
+                        text="🎵 Open App",
+                        web_app=WebAppInfo(url=f"{config.WEBAPP_URL}/app"),
+                    )
+                )
+                LOGGER(__name__).info(f"🌐 Telegram WebApp Menu Button set to {config.WEBAPP_URL}/app")
+            except Exception as e:
+                LOGGER(__name__).warning(f"⚠️ Could not set WebApp Menu Button: {e}")
 
         LOGGER(__name__).info(f"✅ Music Bot started as {self.name} (@{self.username})")

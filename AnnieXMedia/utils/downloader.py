@@ -456,7 +456,9 @@ def _soundcloud_fallback_sync(vid: str, queries: List[str], raw_title: str) -> O
         return None
 
 
-def _dailymotion_video_fallback_sync(vid: str, queries: List[str], raw_title: str) -> Optional[str]:
+def _dailymotion_fallback_sync(
+    vid: str, queries: List[str], raw_title: str, media_type: str = "video"
+) -> Optional[str]:
     search_opts = {
         "quiet": True,
         "no_warnings": True,
@@ -493,13 +495,17 @@ def _dailymotion_video_fallback_sync(vid: str, queries: List[str], raw_title: st
     dl_opts = get_ytdlp_base_opts()
     dl_opts.pop("cookiefile", None)
     dl_opts["outtmpl"] = f"{DOWNLOAD_DIR}/{vid}.%(ext)s"
-    dl_opts["format"] = "best[height<=?720][width<=?1280]/bestvideo[height<=?720]+bestaudio/best"
+    dl_opts["format"] = (
+        "bestaudio/best"
+        if media_type == "audio"
+        else "best[height<=?720][width<=?1280]/bestvideo[height<=?720]+bestaudio/best"
+    )
     try:
         with YoutubeDL(dl_opts) as ydl:
             info = ydl.extract_info(best[1], download=True)
             return get_final_path_from_info(info, vid_override=vid)
     except Exception as e:
-        LOGGER.warning(f"Dailymotion video fallback error for {vid}: {e}")
+        LOGGER.warning(f"Dailymotion {media_type} fallback error for {vid}: {e}")
         return None
 
 
@@ -523,6 +529,12 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
     if audius_best and audius_best[0] >= 0.0:
         if path := await _download_audius_track(vid, audius_best[1]):
             return path, "Audius"
+
+    dm_path = await run_with_semaphore(
+        loop.run_in_executor(None, _dailymotion_fallback_sync, vid, queries, title, "audio")
+    )
+    if dm_path:
+        return dm_path, "Dailymotion-Audio"
 
     return None
 
@@ -650,7 +662,7 @@ async def _download_with_fallback(
             queries = _build_search_queries(title)
             if queries:
                 dm_path = await run_with_semaphore(
-                    loop.run_in_executor(None, _dailymotion_video_fallback_sync, vid, queries, title)
+                    loop.run_in_executor(None, _dailymotion_fallback_sync, vid, queries, title, "video")
                 )
                 if dm_path:
                     log_download_source(title, "Dailymotion-Search")

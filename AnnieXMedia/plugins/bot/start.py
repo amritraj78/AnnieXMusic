@@ -50,6 +50,20 @@ async def start_pm(client, message: Message, _):
     if len(message.text.split()) > 1:
         name = message.text.split(None, 1)[1]
 
+        if name == "webapp":
+            from AnnieXMedia.plugins.tools.webapp import build_private_webapp_markup
+            return await message.reply_text(
+                "🎵 **AnnieXMusic Mini App**\n\nTap below to open the Music Mini App & Neon Arcade!",
+                reply_markup=build_private_webapp_markup(),
+            )
+
+        if name == "game":
+            from AnnieXMedia.plugins.tools.webapp import build_private_arcade_markup
+            return await message.reply_text(
+                "🕹️ **Neon Arcade**\n\nChoose a game below to play and set high scores!",
+                reply_markup=build_private_arcade_markup(),
+            )
+
         if name.startswith("help"):
             keyboard = first_page(_)
             try:

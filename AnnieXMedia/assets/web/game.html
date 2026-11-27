@@ -1,0 +1,674 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no">
+<title>AnnieX Neon Arcade</title>
+<script src="https://telegram.org/js/telegram-web-app.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box;-webkit-tap-highlight-color:transparent;user-select:none}
+  :root{
+    --bg:#090b14;--panel:#121629;--border:rgba(120,150,255,.22);
+    --cyan:#00e5ff;--purple:#9d4edd;--pink:#ff006e;
+    --green:#00f59b;--yellow:#ffd60a;--text:#eef2ff;--sub:#8f9ec7;
+  }
+  html,body{height:100%;background:var(--bg);color:var(--text);font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;overflow:hidden}
+  #app{display:flex;flex-direction:column;height:100%;max-width:460px;margin:0 auto}
+
+  #header{display:flex;align-items:center;gap:8px;padding:10px 12px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
+  .hbtn{background:rgba(255,255,255,.04);border:1px solid var(--border);color:var(--text);padding:6px 10px;border-radius:10px;cursor:pointer;font-size:13px;font-weight:600}
+  .hbtn:active{transform:scale(.95)}
+  h1{font-size:15px;font-weight:800;background:linear-gradient(90deg,var(--cyan),var(--purple));-webkit-background-clip:text;-webkit-text-fill-color:transparent;flex:1}
+  #hiscore{font-size:12px;color:var(--yellow);font-weight:700;padding:4px 9px;background:rgba(255,214,10,.08);border:1px solid rgba(255,214,10,.25);border-radius:999px}
+
+  #scorebar{display:flex;justify-content:space-between;align-items:center;padding:7px 14px;background:rgba(0,229,255,.04);border-bottom:1px solid var(--border);flex-shrink:0}
+  #score-display{font-size:21px;font-weight:800;color:var(--cyan);font-variant-numeric:tabular-nums}
+  #lives-display{font-size:14px;min-width:66px;text-align:center}
+  #level-display{font-size:13px;font-weight:700;color:var(--green)}
+
+  #tabs{display:flex;gap:6px;padding:8px 10px;background:var(--panel);border-bottom:1px solid var(--border);flex-shrink:0}
+  .tab{flex:1;padding:7px 4px;border:1px solid var(--border);border-radius:10px;background:transparent;color:var(--sub);font-size:12px;font-weight:600;cursor:pointer;transition:.15s}
+  .tab.active{border-color:var(--cyan);color:var(--cyan);background:rgba(0,229,255,.1)}
+
+  #canvas-wrap{flex:1;display:flex;align-items:center;justify-content:center;position:relative;overflow:hidden;background:radial-gradient(circle at top,rgba(157,78,221,.12),transparent 55%),var(--bg)}
+  #gc{display:block;width:100%;height:100%;touch-action:none}
+
+  #dpad{position:absolute;bottom:14px;left:50%;transform:translateX(-50%);display:none;grid-template-columns:repeat(3,48px);grid-template-rows:repeat(2,44px);gap:6px;z-index:6;opacity:.88}
+  #dpad button{background:rgba(18,22,41,.86);border:1px solid var(--border);color:var(--cyan);border-radius:12px;font-size:18px;font-weight:700;cursor:pointer}
+  #dpad button:active{background:rgba(0,229,255,.2)}
+
+  #overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:20px;background:rgba(9,11,20,.9);backdrop-filter:blur(6px);z-index:10}
+  #overlay h2{font-size:23px;font-weight:800;text-align:center}
+  #overlay p{font-size:13.5px;color:var(--sub);text-align:center;max-width:290px;line-height:1.45}
+  .btn-row{display:flex;gap:10px;margin-top:4px;flex-wrap:wrap;justify-content:center}
+  .btn{padding:12px 26px;border:none;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer;transition:.15s}
+  .btn:active{transform:scale(.96)}
+  .btn-primary{background:linear-gradient(135deg,var(--cyan),var(--purple));color:#04101f}
+  .btn-secondary{background:var(--panel);border:1px solid var(--border);color:var(--text)}
+
+  #lb-panel{position:absolute;inset:auto 0 0 0;background:var(--panel);border-top:2px solid var(--cyan);max-height:58%;overflow-y:auto;padding:12px 14px;z-index:15;box-shadow:0 -10px 30px rgba(0,0,0,.6)}
+  #lb-head{display:flex;justify-content:space-between;align-items:center;margin-bottom:8px}
+  #lb-head h3{font-size:14px;color:var(--cyan)}
+  #lb-me{font-size:12px;color:var(--yellow);margin-bottom:8px;font-weight:600}
+  .lb-row{display:flex;align-items:center;gap:8px;padding:7px 4px;border-bottom:1px solid rgba(120,150,255,.12);font-size:13px}
+  .lb-rank{width:26px;font-weight:800;color:var(--yellow)}
+  .lb-name{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .lb-score{color:var(--cyan);font-weight:700;font-variant-numeric:tabular-nums}
+
+  #toast{position:absolute;top:12px;left:50%;transform:translateX(-50%);background:#172038;border:1px solid var(--cyan);color:var(--text);padding:7px 16px;border-radius:999px;font-size:12.5px;font-weight:600;z-index:25;opacity:0;transition:opacity .25s;pointer-events:none;white-space:nowrap}
+</style>
+</head>
+<body>
+<div id="app">
+  <div id="header">
+    <button class="hbtn" onclick="goBack()">← App</button>
+    <h1 id="game-title">🎹 Beat Tiles</h1>
+    <button class="hbtn" id="sound-btn" onclick="toggleSound()">🔊</button>
+    <span id="hiscore">Best: 0</span>
+  </div>
+  <div id="scorebar">
+    <div id="score-display">0</div>
+    <div id="lives-display">❤️❤️❤️</div>
+    <div id="level-display">Lv 1</div>
+  </div>
+  <div id="tabs">
+    <button class="tab active" data-game="beats" onclick="switchGame('beats')">🎹 Beat Tiles</button>
+    <button class="tab" data-game="snake" onclick="switchGame('snake')">🐍 Neon Snake</button>
+    <button class="tab" data-game="flappy" onclick="switchGame('flappy')">⚡ Flappy Beat</button>
+  </div>
+  <div id="canvas-wrap">
+    <canvas id="gc"></canvas>
+    <div id="dpad">
+      <div></div><button onclick="snakeSteer(0,-1)">▲</button><div></div>
+      <button onclick="snakeSteer(-1,0)">◀</button><button onclick="snakeSteer(0,1)">▼</button><button onclick="snakeSteer(1,0)">▶</button>
+    </div>
+    <div id="overlay">
+      <h2 id="ov-title">🎹 Beat Tiles</h2>
+      <p id="ov-sub">Tap falling neon tiles (or tap their lane near the line). Build combos!</p>
+      <div class="btn-row">
+        <button class="btn btn-primary" onclick="startGame()">▶ Play Now</button>
+        <button class="btn btn-secondary" onclick="toggleLB()">🏆 Leaderboard</button>
+      </div>
+    </div>
+    <div id="lb-panel" style="display:none">
+      <div id="lb-head">
+        <h3 id="lb-title">🏆 Top Players</h3>
+        <button class="hbtn" onclick="toggleLB(false)">✕</button>
+      </div>
+      <div id="lb-me"></div>
+      <div id="lb-rows"><p style="color:var(--sub);font-size:13px">Loading…</p></div>
+    </div>
+    <div id="toast"></div>
+  </div>
+</div>
+
+<script>
+const tg = window.Telegram && window.Telegram.WebApp ? window.Telegram.WebApp : null;
+if (tg) { tg.ready(); tg.expand(); }
+
+const urlParams = new URLSearchParams(location.search);
+const initData = tg ? (tg.initData || "") : "";
+const launchToken = urlParams.get("launch") || "";
+const tgUser = (tg && tg.initDataUnsafe && tg.initDataUnsafe.user) ? tg.initDataUnsafe.user : {};
+const BASE = window.location.origin;
+
+const GAMES = {
+  beats: { title: "🎹 Beat Tiles", desc: "Tap falling neon tiles before they pass the line. Keys 1-4 / D-F-J-K also work!" },
+  snake: { title: "🐍 Neon Snake", desc: "Eat golden notes to grow. Swipe, use arrows, or tap the pad below!" },
+  flappy: { title: "⚡ Flappy Beat", desc: "Tap or press Space to fly through the neon equalizer gates!" }
+};
+
+let currentGame = "beats";
+let score = 0, lives = 3, level = 1, hiscore = 0;
+let gameRunning = false, animFrame = null;
+let gameCtrl = null;
+let soundOn = true;
+let audioCtx = null;
+let snakeSteerFn = null;
+
+const canvas = document.getElementById("gc");
+const ctx = canvas.getContext("2d");
+const wrap = document.getElementById("canvas-wrap");
+
+function resizeCanvas() {
+  canvas.width = Math.max(260, wrap.clientWidth);
+  canvas.height = Math.max(300, wrap.clientHeight);
+}
+window.addEventListener("resize", resizeCanvas);
+resizeCanvas();
+
+function beep(freq = 520, dur = 0.055, type = "sine", vol = 0.07) {
+  if (!soundOn) return;
+  try {
+    audioCtx = audioCtx || new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = type;
+    osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+    gain.gain.setValueAtTime(vol, audioCtx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.001, audioCtx.currentTime + dur);
+    osc.connect(gain); gain.connect(audioCtx.destination);
+    osc.start(); osc.stop(audioCtx.currentTime + dur);
+  } catch (e) {}
+}
+
+function toggleSound() {
+  soundOn = !soundOn;
+  document.getElementById("sound-btn").textContent = soundOn ? "🔊" : "🔇";
+}
+
+function haptic(kind = "light") {
+  try { tg && tg.HapticFeedback && tg.HapticFeedback.impactOccurred(kind); } catch (e) {}
+}
+
+function esc(s) {
+  return String(s == null ? "" : s).replace(/&/g,"&amp;").replace(/</g,"&lt;").replace(/>/g,"&gt;");
+}
+
+function toast(msg, ms = 2200) {
+  const el = document.getElementById("toast");
+  el.textContent = msg;
+  el.style.opacity = "1";
+  clearTimeout(el._t);
+  el._t = setTimeout(() => { el.style.opacity = "0"; }, ms);
+}
+
+function setScore(v) { score = v; document.getElementById("score-display").textContent = v; }
+function setLives(v) {
+  lives = v;
+  document.getElementById("lives-display").textContent = v < 0 ? "⚡" : ("❤️".repeat(v) + "🖤".repeat(Math.max(0, 3 - v)));
+}
+function setLevel(v) { level = v; document.getElementById("level-display").textContent = "Lv " + v; }
+
+function showOverlay(title, sub) {
+  document.getElementById("ov-title").textContent = title;
+  document.getElementById("ov-sub").textContent = sub;
+  document.getElementById("overlay").style.display = "flex";
+}
+function hideOverlay() { document.getElementById("overlay").style.display = "none"; }
+
+function goBack() {
+  if (document.referrer && document.referrer.includes("/app")) history.back();
+  else window.location.href = "/app";
+}
+
+function snakeSteer(dx, dy) {
+  if (snakeSteerFn) snakeSteerFn(dx, dy);
+}
+
+function hiKey(g = currentGame) {
+  return `hi_${g}_${tgUser.id || "guest"}`;
+}
+
+function updateBestDisplay(val) {
+  hiscore = Math.max(hiscore, val || 0);
+  localStorage.setItem(hiKey(), String(hiscore));
+  document.getElementById("hiscore").textContent = "Best: " + hiscore;
+}
+
+function loadHiscore() {
+  hiscore = parseInt(localStorage.getItem(hiKey()) || "0", 10) || 0;
+  document.getElementById("hiscore").textContent = "Best: " + hiscore;
+  syncPersonalBest();
+}
+
+async function syncPersonalBest() {
+  try {
+    const qs = new URLSearchParams({ game: currentGame });
+    if (launchToken) qs.set("launch", launchToken);
+    const headers = {};
+    if (initData) headers["X-Telegram-Init-Data"] = initData;
+    const r = await fetch(`${BASE}/api/games/leaderboard?${qs}`, { headers });
+    if (!r.ok) return;
+    const d = await r.json();
+    if (d.personal && typeof d.personal.score === "number") updateBestDisplay(d.personal.score);
+  } catch (e) {}
+}
+
+async function submitScore() {
+  if (!initData && !launchToken) return;
+  try {
+    const headers = { "Content-Type": "application/json" };
+    if (initData) headers["X-Telegram-Init-Data"] = initData;
+    const r = await fetch(`${BASE}/api/games/score`, {
+      method: "POST",
+      headers,
+      body: JSON.stringify({ game: currentGame, score, launch: launchToken }),
+    });
+    const d = await r.json().catch(() => ({}));
+    if (r.ok && d.personal) {
+      updateBestDisplay(d.personal.score);
+      toast(`🏆 Saved! Global Rank #${d.personal.rank}`);
+      if (document.getElementById("lb-panel").style.display !== "none") fetchLB();
+    }
+  } catch (e) {}
+}
+
+function switchGame(name) {
+  if (!GAMES[name]) return;
+  stopGame();
+  currentGame = name;
+  document.querySelectorAll(".tab").forEach(t => t.classList.toggle("active", t.dataset.game === name));
+  document.getElementById("game-title").textContent = GAMES[name].title;
+  document.getElementById("dpad").style.display = "none";
+  setScore(0); setLives(name === "beats" ? 3 : -1); setLevel(1);
+  showOverlay(GAMES[name].title, GAMES[name].desc);
+  loadHiscore();
+  if (document.getElementById("lb-panel").style.display !== "none") fetchLB();
+}
+
+function toggleLB(forceState) {
+  const lb = document.getElementById("lb-panel");
+  const open = typeof forceState === "boolean" ? forceState : (lb.style.display === "none");
+  lb.style.display = open ? "block" : "none";
+  if (open) fetchLB();
+}
+
+async function fetchLB() {
+  const rows = document.getElementById("lb-rows");
+  const me = document.getElementById("lb-me");
+  document.getElementById("lb-title").textContent = "🏆 " + GAMES[currentGame].title + " Leaderboard";
+  rows.innerHTML = '<p style="color:var(--sub);font-size:13px">Loading…</p>';
+  me.textContent = "";
+  try {
+    const qs = new URLSearchParams({ game: currentGame });
+    if (launchToken) qs.set("launch", launchToken);
+    const headers = {};
+    if (initData) headers["X-Telegram-Init-Data"] = initData;
+    const r = await fetch(`${BASE}/api/games/leaderboard?${qs}`, { headers });
+    const d = await r.json();
+    const list = d.scores || [];
+    if (d.personal) {
+      updateBestDisplay(d.personal.score);
+      me.textContent = `Your Best: ${d.personal.score} (Rank #${d.personal.rank})`;
+    }
+    if (!list.length) {
+      rows.innerHTML = '<p style="color:var(--sub);font-size:13px">No scores yet. Play a round to claim #1!</p>';
+      return;
+    }
+    rows.innerHTML = list.map((e, i) => `
+      <div class="lb-row">
+        <span class="lb-rank">#${e.rank || (i + 1)}</span>
+        <span class="lb-name">${esc(e.name || "Player")}</span>
+        <span class="lb-score">${e.score}</span>
+      </div>`).join("");
+  } catch (e) {
+    rows.innerHTML = '<p style="color:var(--sub);font-size:13px">Leaderboard unavailable offline.</p>';
+  }
+}
+
+function stopGame() {
+  gameRunning = false;
+  snakeSteerFn = null;
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  if (gameCtrl) { gameCtrl.abort(); gameCtrl = null; }
+  document.getElementById("dpad").style.display = "none";
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+}
+
+function startGame() {
+  stopGame();
+  hideOverlay();
+  toggleLB(false);
+  resizeCanvas();
+  gameCtrl = new AbortController();
+  setScore(0);
+  setLevel(1);
+  setLives(currentGame === "beats" ? 3 : -1);
+  gameRunning = true;
+  if (currentGame === "beats") startBeats();
+  else if (currentGame === "snake") startSnake();
+  else startFlappy();
+}
+
+function gameOver(reason) {
+  if (!gameRunning) return;
+  gameRunning = false;
+  snakeSteerFn = null;
+  if (animFrame) { cancelAnimationFrame(animFrame); animFrame = null; }
+  if (gameCtrl) { gameCtrl.abort(); gameCtrl = null; }
+  document.getElementById("dpad").style.display = "none";
+  beep(170, 0.22, "sawtooth", 0.08);
+  haptic("heavy");
+  const isNew = score > hiscore;
+  updateBestDisplay(score);
+  if (isNew && score > 0) toast("🎉 New Personal Best: " + score + "!");
+  if (score > 0) submitScore();
+  showOverlay("💥 " + reason, `Final Score: ${score}  •  Best: ${hiscore}`);
+}
+
+function roundRect(c, x, y, w, h, r) {
+  c.beginPath();
+  c.moveTo(x + r, y);
+  c.lineTo(x + w - r, y);
+  c.arcTo(x + w, y, x + w, y + r, r);
+  c.lineTo(x + w, y + h - r);
+  c.arcTo(x + w, y + h, x + w - r, y + h, r);
+  c.lineTo(x + r, y + h);
+  c.arcTo(x, y + h, x, y + h - r, r);
+  c.lineTo(x, y + r);
+  c.arcTo(x, y, x + r, y, r);
+  c.closePath();
+}
+
+// ═══════════════════════════════════════════════════════
+//  GAME 1: BEAT TILES
+// ═══════════════════════════════════════════════════════
+function startBeats() {
+  const sig = gameCtrl.signal;
+  const COLS = 4, COLORS = ["#00e5ff", "#b5179e", "#ff006e", "#00f59b"];
+  const NOTES = [261.6, 329.6, 392.0, 523.2];
+  let tiles = [], flashes = [], combo = 0;
+  let spawnTimer = 0, lastTs = performance.now();
+
+  function hitCol(col, cy) {
+    const H = canvas.height, HZ = H - 84;
+    let bestIdx = -1, bestY = -9999;
+    for (let i = 0; i < tiles.length; i++) {
+      const t = tiles[i];
+      if (!t.alive || t.col !== col) continue;
+      if ((cy >= t.y - 16 && cy <= t.y + t.h + 24) || t.y + t.h >= HZ - 36) {
+        if (t.y > bestY) { bestY = t.y; bestIdx = i; }
+      }
+    }
+    if (bestIdx !== -1) {
+      const t = tiles[bestIdx];
+      t.alive = false;
+      combo++;
+      const pts = combo >= 8 ? 20 : (combo >= 4 ? 12 : 6);
+      setScore(score + pts);
+      flashes.push({ x: t.x, y: t.y, w: t.w, h: t.h, color: t.color, life: 1.0 });
+      beep(NOTES[col], 0.07, "triangle", 0.08);
+      haptic("light");
+      const nextLv = 1 + Math.floor(score / 120);
+      if (nextLv > level) { setLevel(nextLv); toast("⚡ Level " + nextLv); }
+    } else {
+      combo = 0;
+    }
+  }
+
+  canvas.addEventListener("pointerdown", e => {
+    if (!gameRunning) return;
+    const rect = canvas.getBoundingClientRect();
+    const cx = e.clientX - rect.left;
+    const cy = e.clientY - rect.top;
+    const col = Math.min(COLS - 1, Math.max(0, Math.floor(cx / (canvas.width / COLS))));
+    hitCol(col, cy);
+  }, { signal: sig });
+
+  const keyMap = { "1": 0, "d": 0, "2": 1, "f": 1, "3": 2, "j": 2, "4": 3, "k": 3 };
+  document.addEventListener("keydown", e => {
+    const col = keyMap[e.key.toLowerCase()];
+    if (col !== undefined && gameRunning) hitCol(col, canvas.height - 60);
+  }, { signal: sig });
+
+  function loop(ts) {
+    if (!gameRunning) return;
+    const W = canvas.width, H = canvas.height, colW = W / COLS, tileH = 74, HZ = H - 84;
+    const dtMs = Math.min(48, ts - lastTs); lastTs = ts;
+    const dt = dtMs / 16.667;
+    const speed = 3.2 + (level - 1) * 0.55;
+    const spawnMs = Math.max(290, 740 - (level - 1) * 55);
+
+    spawnTimer += dtMs;
+    if (spawnTimer >= spawnMs) {
+      spawnTimer = 0;
+      const col = Math.floor(Math.random() * COLS);
+      tiles.push({ x: col * colW + 5, y: -tileH, w: colW - 10, h: tileH, col, color: COLORS[col], alive: true });
+    }
+
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(120,150,255,.15)"; ctx.lineWidth = 1;
+    for (let i = 1; i < COLS; i++) {
+      ctx.beginPath(); ctx.moveTo(i * colW, 0); ctx.lineTo(i * colW, H); ctx.stroke();
+    }
+    ctx.fillStyle = "rgba(0,229,255,.05)";
+    ctx.fillRect(0, HZ, W, H - HZ);
+    ctx.strokeStyle = "rgba(0,229,255,.45)"; ctx.setLineDash([7, 5]);
+    ctx.beginPath(); ctx.moveTo(0, HZ); ctx.lineTo(W, HZ); ctx.stroke();
+    ctx.setLineDash([]);
+
+    for (let i = flashes.length - 1; i >= 0; i--) {
+      const f = flashes[i];
+      ctx.save();
+      ctx.globalAlpha = f.life * 0.7;
+      ctx.fillStyle = f.color;
+      ctx.shadowColor = f.color; ctx.shadowBlur = 22;
+      roundRect(ctx, f.x - 3, f.y - 3, f.w + 6, f.h + 6, 12); ctx.fill();
+      ctx.restore();
+      f.life -= 0.08 * dt;
+      if (f.life <= 0) flashes.splice(i, 1);
+    }
+
+    for (let i = tiles.length - 1; i >= 0; i--) {
+      const t = tiles[i];
+      if (!t.alive) { tiles.splice(i, 1); continue; }
+      t.x = t.col * colW + 5; t.w = colW - 10;
+      t.y += speed * dt;
+      if (t.y > H) {
+        tiles.splice(i, 1);
+        combo = 0;
+        setLives(lives - 1);
+        beep(140, 0.09, "square", 0.05);
+        haptic("medium");
+        if (lives <= 0) { gameOver("Missed Too Many Beats!"); return; }
+        continue;
+      }
+      ctx.save();
+      ctx.shadowColor = t.color; ctx.shadowBlur = 14;
+      ctx.fillStyle = t.color;
+      roundRect(ctx, t.x, t.y, t.w, t.h, 12); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "rgba(255,255,255,.22)";
+      roundRect(ctx, t.x + 4, t.y + 4, t.w - 8, 16, 8); ctx.fill();
+      ctx.restore();
+    }
+
+    if (combo >= 3) {
+      ctx.fillStyle = "#00e5ff"; ctx.font = "800 15px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText(`x${combo} COMBO`, W / 2, 28);
+    }
+    animFrame = requestAnimationFrame(loop);
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════
+//  GAME 2: NEON SNAKE
+// ═══════════════════════════════════════════════════════
+function startSnake() {
+  const sig = gameCtrl.signal;
+  document.getElementById("dpad").style.display = "grid";
+  const SZ = 20;
+  let COLS = Math.floor(canvas.width / SZ), ROWS = Math.floor((canvas.height - 96) / SZ);
+  let snake = [{ x: Math.floor(COLS / 2), y: Math.floor(ROWS / 2) }];
+  let dir = { x: 1, y: 0 }, nextDir = { x: 1, y: 0 };
+  let food = rndFood(), stepMs = 135, lastStep = performance.now();
+
+  function rndFood() {
+    let f;
+    do { f = { x: Math.floor(Math.random() * COLS), y: Math.floor(Math.random() * ROWS) }; }
+    while (snake.some(s => s.x === f.x && s.y === f.y));
+    return f;
+  }
+
+  function steer(dx, dy) {
+    if (dx !== 0 && dir.x === -dx) return;
+    if (dy !== 0 && dir.y === -dy) return;
+    nextDir = { x: dx, y: dy };
+  }
+  snakeSteerFn = steer;
+
+  let tx = 0, ty = 0;
+  canvas.addEventListener("pointerdown", e => { tx = e.clientX; ty = e.clientY; }, { signal: sig });
+  canvas.addEventListener("pointerup", e => {
+    const dx = e.clientX - tx, dy = e.clientY - ty;
+    if (Math.hypot(dx, dy) < 16) return;
+    if (Math.abs(dx) > Math.abs(dy)) steer(dx > 0 ? 1 : -1, 0);
+    else steer(0, dy > 0 ? 1 : -1);
+  }, { signal: sig });
+
+  document.addEventListener("keydown", e => {
+    const k = e.key.toLowerCase();
+    if (k === "arrowup" || k === "w") steer(0, -1);
+    else if (k === "arrowdown" || k === "s") steer(0, 1);
+    else if (k === "arrowleft" || k === "a") steer(-1, 0);
+    else if (k === "arrowright" || k === "d") steer(1, 0);
+  }, { signal: sig });
+
+  function loop(ts) {
+    if (!gameRunning) return;
+    animFrame = requestAnimationFrame(loop);
+    if (ts - lastStep < stepMs) return;
+    lastStep = ts;
+
+    COLS = Math.max(10, Math.floor(canvas.width / SZ));
+    ROWS = Math.max(10, Math.floor((canvas.height - 96) / SZ));
+    dir = nextDir;
+    const head = { x: (snake[0].x + dir.x + COLS) % COLS, y: (snake[0].y + dir.y + ROWS) % ROWS };
+    if (snake.some(s => s.x === head.x && s.y === head.y)) { gameOver("Snake Crashed!"); return; }
+
+    snake.unshift(head);
+    if (head.x === food.x && head.y === food.y) {
+      setScore(score + 10 + level * 2);
+      beep(660, 0.07, "sine", 0.08);
+      haptic("light");
+      food = rndFood();
+      const nextLv = 1 + Math.floor(score / 80);
+      if (nextLv > level) {
+        setLevel(nextLv);
+        stepMs = Math.max(70, 135 - (nextLv - 1) * 10);
+        toast("⚡ Speed Level " + nextLv);
+      }
+    } else { snake.pop(); }
+
+    const W = canvas.width, H = canvas.height, offX = Math.floor((W - COLS * SZ) / 2);
+    ctx.clearRect(0, 0, W, H);
+    ctx.strokeStyle = "rgba(120,150,255,.1)"; ctx.lineWidth = 1;
+    ctx.strokeRect(offX, 4, COLS * SZ, ROWS * SZ);
+
+    ctx.save();
+    ctx.shadowColor = "#ffd60a"; ctx.shadowBlur = 18; ctx.fillStyle = "#ffd60a";
+    ctx.beginPath(); ctx.arc(offX + food.x * SZ + SZ / 2, 4 + food.y * SZ + SZ / 2, SZ / 2 - 3, 0, Math.PI * 2); ctx.fill();
+    snake.forEach((s, i) => {
+      const c = i === 0 ? "#00e5ff" : (i % 2 === 0 ? "#9d4edd" : "#7b2cbf");
+      ctx.shadowColor = c; ctx.shadowBlur = i === 0 ? 14 : 4; ctx.fillStyle = c;
+      roundRect(ctx, offX + s.x * SZ + 1.5, 4 + s.y * SZ + 1.5, SZ - 3, SZ - 3, 5); ctx.fill();
+    });
+    ctx.restore();
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════
+//  GAME 3: FLAPPY BEAT
+// ═══════════════════════════════════════════════════════
+function startFlappy() {
+  const sig = gameCtrl.signal;
+  let bird = { x: canvas.width * 0.26, y: canvas.height * 0.48, vy: 0, r: 14 };
+  const GRAV = 0.42, FLAP = -7.6, PIPE_W = 44;
+  let pipes = [], spawnDist = 0, started = false, frame = 0, lastTs = performance.now();
+
+  function flap() {
+    if (!gameRunning) return;
+    if (!started) started = true;
+    bird.vy = FLAP;
+    beep(440, 0.05, "sine", 0.06);
+    haptic("light");
+  }
+  canvas.addEventListener("pointerdown", e => { e.preventDefault(); flap(); }, { signal: sig });
+  document.addEventListener("keydown", e => {
+    if ((e.code === "Space" || e.code === "ArrowUp") && gameRunning) { e.preventDefault(); flap(); }
+  }, { signal: sig });
+
+  function drawBird() {
+    ctx.save();
+    ctx.shadowColor = "#00e5ff"; ctx.shadowBlur = 18; ctx.fillStyle = "#00e5ff";
+    ctx.beginPath(); ctx.arc(bird.x, bird.y, bird.r, 0, Math.PI * 2); ctx.fill();
+    ctx.shadowBlur = 0;
+    ctx.fillStyle = "#fff"; ctx.beginPath(); ctx.arc(bird.x + 5, bird.y - 4, 4.5, 0, Math.PI * 2); ctx.fill();
+    ctx.fillStyle = "#090b14"; ctx.beginPath(); ctx.arc(bird.x + 6, bird.y - 4, 2.2, 0, Math.PI * 2); ctx.fill();
+    ctx.restore();
+  }
+
+  function loop(ts) {
+    if (!gameRunning) return;
+    const W = canvas.width, H = canvas.height;
+    const dt = Math.min(2.2, Math.max(0.4, (ts - lastTs) / 16.667));
+    lastTs = ts;
+    frame += dt;
+    ctx.clearRect(0, 0, W, H);
+
+    const gap = Math.max(108, 166 - (level - 1) * 7);
+    const speed = 2.6 + (level - 1) * 0.25;
+
+    if (!started) {
+      bird.x = W * 0.26;
+      bird.y = H * 0.48 + Math.sin(frame * 0.08) * 10;
+      drawBird();
+      ctx.fillStyle = "rgba(0,229,255,.85)"; ctx.font = "700 16px sans-serif"; ctx.textAlign = "center";
+      ctx.fillText("Tap anywhere or press Space to fly!", W / 2, H * 0.34);
+      animFrame = requestAnimationFrame(loop);
+      return;
+    }
+
+    bird.vy += GRAV * dt;
+    bird.y += bird.vy * dt;
+    if (bird.y - bird.r <= 0) { bird.y = bird.r; bird.vy = 0; }
+    if (bird.y + bird.r >= H) { gameOver("Crashed Into Floor!"); return; }
+
+    spawnDist += speed * dt;
+    if (spawnDist >= 215) {
+      spawnDist = 0;
+      const topH = 48 + Math.random() * Math.max(60, H - gap - 96);
+      pipes.push({ x: W, topH, gap, scored: false });
+    }
+
+    for (let i = pipes.length - 1; i >= 0; i--) {
+      const p = pipes[i];
+      p.x -= speed * dt;
+      if (p.x + PIPE_W < 0) { pipes.splice(i, 1); continue; }
+
+      const botY = p.topH + p.gap;
+      if (bird.x + bird.r - 2 > p.x && bird.x - bird.r + 2 < p.x + PIPE_W) {
+        if (bird.y - bird.r + 2 < p.topH || bird.y + bird.r - 2 > botY) {
+          gameOver("Hit Equalizer Gate!"); return;
+        }
+      }
+      if (!p.scored && p.x + PIPE_W < bird.x) {
+        p.scored = true;
+        setScore(score + 1);
+        beep(740, 0.05, "triangle", 0.06);
+        haptic("light");
+        const nextLv = 1 + Math.floor(score / 6);
+        if (nextLv > level) { setLevel(nextLv); toast("⚡ Level " + nextLv); }
+      }
+
+      ctx.save();
+      ctx.shadowColor = "#00f59b"; ctx.shadowBlur = 10; ctx.fillStyle = "#00f59b";
+      roundRect(ctx, p.x, -4, PIPE_W, p.topH + 4, 6); ctx.fill();
+      roundRect(ctx, p.x, botY, PIPE_W, H - botY + 4, 6); ctx.fill();
+      ctx.shadowBlur = 0;
+      ctx.fillStyle = "#00c47a";
+      ctx.fillRect(p.x - 3, p.topH - 12, PIPE_W + 6, 12);
+      ctx.fillRect(p.x - 3, botY, PIPE_W + 6, 12);
+      ctx.restore();
+    }
+
+    drawBird();
+    animFrame = requestAnimationFrame(loop);
+  }
+  animFrame = requestAnimationFrame(loop);
+}
+
+// ═══════════════════════════════════════════════════════
+//  BOOT
+// ═══════════════════════════════════════════════════════
+(function init() {
+  const g = urlParams.get("game");
+  switchGame(GAMES[g] ? g : "beats");
+})();
+</script>
+</body>
+</html>

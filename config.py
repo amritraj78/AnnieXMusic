@@ -51,6 +51,8 @@ DEEP_API = getenv("DEEP_API")      # optional
 # ── Hosting / deployment ───────────────────────────────────────────────────────
 HEROKU_APP_NAME = getenv("HEROKU_APP_NAME")
 HEROKU_API_KEY = getenv("HEROKU_API_KEY")
+WEBAPP_URL = (getenv("WEBAPP_URL") or "https://anniexmusic-animeworlds-667336a7.apps.mistral.run").rstrip("/")
+GAME_SHORT_NAME = (getenv("GAME_SHORT_NAME") or "anniexgame").strip()
 
 # ── Git / updates ──────────────────────────────────────────────────────────────
 UPSTREAM_REPO = getenv("UPSTREAM_REPO") or "https://github.com/amritraj78/AnnieXMusic"
