@@ -63,9 +63,12 @@ GIT_TOKEN = getenv("GIT_TOKEN")  # needed if repo is private
 SUPPORT_CHANNEL = getenv("SUPPORT_CHANNEL") or "https://t.me/privatethink"
 SUPPORT_CHAT = getenv("SUPPORT_CHAT") or "https://t.me/amrit_feel"
 
-# ── Assistant auto-leave ───────────────────────────────────────────────────────
+# ── Assistant auto-leave & Self-healing ────────────────────────────────────────
 AUTO_LEAVING_ASSISTANT = getenv("AUTO_LEAVING_ASSISTANT", "False").strip().lower() in ("true", "1", "yes")
 AUTO_LEAVE_ASSISTANT_TIME = _env_int("ASSISTANT_LEAVE_TIME", 3600)
+AUTOPLAY_DEFAULT = getenv("AUTOPLAY_DEFAULT", "True").strip().lower() in ("true", "1", "yes")
+KEEP_ALIVE_INTERVAL = max(60, _env_int("KEEP_ALIVE_INTERVAL", 240))
+SELF_HEAL_INTERVAL = max(20, _env_int("SELF_HEAL_INTERVAL", 45))
 
 # ── Debug ──────────────────────────────────────────────────────────────────────
 DEBUG_IGNORE_LOG = True

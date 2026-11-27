@@ -35,8 +35,15 @@ def prune_storage_cache(
         age_limit = 172800 if folder == COUPLE_DIR else max_age_seconds
         try:
             for entry in os.scandir(folder):
-                if not entry.is_file() or entry.name.endswith(".part"):
+                if not entry.is_file() or entry.name.endswith(".part") or entry.name.endswith(".tgpart"):
                     continue
+                try:
+                    from AnnieXMedia.core.track_cache import is_path_pinned
+
+                    if is_path_pinned(entry.path):
+                        continue
+                except Exception:
+                    pass
                 try:
                     st = entry.stat()
                 except OSError:

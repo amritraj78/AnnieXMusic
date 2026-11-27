@@ -2,12 +2,14 @@
 import random
 from typing import Dict, List, Union
 
+import config
 from AnnieXMedia import userbot
 from AnnieXMedia.core.mongo import mongodb
 
 authdb = mongodb.adminauth
 authuserdb = mongodb.authuser
 autoenddb = mongodb.autoend
+autoplaydb = mongodb.autoplaydb
 assdb = mongodb.assistants
 blacklist_chatdb = mongodb.blacklistChat
 blockeddb = mongodb.blockedusers
@@ -28,6 +30,7 @@ active = []
 activevideo = []
 assistantdict = {}
 autoend = {}
+autoplay = {}
 count = {}
 channelconnect = {}
 langm = {}
@@ -220,6 +223,35 @@ async def autoend_on():
 async def autoend_off():
     chat_id = 1234
     await autoenddb.delete_one({"chat_id": chat_id})
+
+
+async def is_autoplay(chat_id: int) -> bool:
+    """Return True if smart radio autoplay is enabled for the group."""
+    mode = autoplay.get(chat_id)
+    if mode is None:
+        doc = await autoplaydb.find_one({"chat_id": chat_id})
+        if doc is None:
+            default_val = bool(getattr(config, "AUTOPLAY_DEFAULT", True))
+            autoplay[chat_id] = default_val
+            return default_val
+        enabled = bool(doc.get("enabled", True))
+        autoplay[chat_id] = enabled
+        return enabled
+    return bool(mode)
+
+
+async def autoplay_on(chat_id: int):
+    autoplay[chat_id] = True
+    await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"enabled": True}}, upsert=True
+    )
+
+
+async def autoplay_off(chat_id: int):
+    autoplay[chat_id] = False
+    await autoplaydb.update_one(
+        {"chat_id": chat_id}, {"$set": {"enabled": False}}, upsert=True
+    )
 
 
 async def get_loop(chat_id: int) -> int:

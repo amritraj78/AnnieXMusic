@@ -19,6 +19,13 @@ async def _clean_entry(entry: dict):
         return
     if rem in autoclean:
         autoclean.remove(rem)
+    try:
+        from AnnieXMedia.core.track_cache import is_path_pinned
+
+        if is_path_pinned(rem):
+            return
+    except Exception:
+        pass
     count = autoclean.count(rem)
     if count == 0:
         if not any(k in str(rem) for k in ("vid_", "live_", "index_")):

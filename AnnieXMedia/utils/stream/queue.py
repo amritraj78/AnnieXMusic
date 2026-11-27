@@ -47,6 +47,10 @@ async def put_queue(
             db[chat_id] = []
         db[chat_id].append(put)
     autoclean.append(file)
+    if forceplay or len(db.get(chat_id) or []) == 1:
+        from AnnieXMedia.core.prefetch import record_played_track
+
+        record_played_track(chat_id, put)
 
 
 async def put_queue_index(

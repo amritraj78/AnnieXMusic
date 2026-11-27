@@ -152,8 +152,18 @@ async def _handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWr
                 405, "application/json; charset=utf-8", b'{"error":"Method not allowed"}\n', method
             )
         elif path in ("/health", "/ping", "/status"):
-            uptime = int(time.time() - _start_time)
-            body = f'{{"status":"ok","service":"AnnieXMusic","uptime":"{uptime}s"}}\n'.encode("utf-8")
+            from AnnieXMedia.core.self_heal import get_health_snapshot
+
+            snap = get_health_snapshot()
+            payload = {
+                "status": "ok",
+                "service": "AnnieXMusic",
+                "uptime": f"{int(time.time() - _start_time)}s",
+                "db_ok": snap["db_ok"],
+                "bot_connected": snap["bot_connected"],
+                "recoveries": snap["recoveries"],
+            }
+            body = (json.dumps(payload) + "\n").encode("utf-8")
             resp = _send_response_bytes(200, "application/json; charset=utf-8", body, method)
         elif path == "/app":
             asset = await _load_web_asset_async("app.html")

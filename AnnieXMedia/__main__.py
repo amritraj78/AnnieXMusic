@@ -12,6 +12,7 @@ from AnnieXMedia import Carbon, LOGGER, app, userbot
 from AnnieXMedia.core.call import StreamController
 from AnnieXMedia.core.dir import prune_storage_cache
 from AnnieXMedia.core.mongo import ensure_indexes
+from AnnieXMedia.core.self_heal import start_self_heal, stop_self_heal
 from AnnieXMedia.core.server import start_web_server, stop_web_server
 from AnnieXMedia.misc import sudo
 from AnnieXMedia.plugins import ALL_MODULES
@@ -90,6 +91,7 @@ async def init():
         LOGGER("AnnieXMedia").warning(f"Initial logger call test skipped: {e}")
 
     await StreamController.decorators()
+    start_self_heal()
     cleanup_task = asyncio.create_task(_periodic_storage_cleanup())
     LOGGER("AnnieXMedia").info(
         "\x41\x6e\x6e\x69\x65\x20\x4d\x75\x73\x69\x63\x20\x52\x6f\x62\x6f\x74\x20\x53\x74\x61\x72\x74\x65\x64\x20\x53\x75\x63\x63\x65\x73\x73\x66\x75\x6c\x6c\x79\x2e\x2e\x2e"
@@ -100,6 +102,7 @@ async def init():
         cleanup_task.cancel()
         with contextlib.suppress(asyncio.CancelledError, Exception):
             await cleanup_task
+        await stop_self_heal()
         for step in (
             StreamController.stop,
             app.stop,

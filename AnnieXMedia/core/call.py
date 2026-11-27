@@ -23,11 +23,14 @@ from AnnieXMedia.utils.database import (
     get_loop,
     group_assistant,
     is_autoend,
+    is_autoplay,
     music_on,
     remove_active_chat,
     remove_active_video_chat,
     set_loop,
 )
+from AnnieXMedia.core.prefetch import queue_smart_autoplay_track, record_played_track
+from AnnieXMedia.core.track_cache import is_valid_vidid
 from AnnieXMedia.utils.exceptions import AssistantErr
 from AnnieXMedia.utils.formatters import check_duration, seconds_to_min, speed_converter
 from AnnieXMedia.utils.inline.play import stream_markup
@@ -365,6 +368,7 @@ class Call:
                         self.active_calls.discard(chat_id)
                 return
 
+            prev_track = dict(check[0]) if isinstance(check[0], dict) else None
             if loop == 0:
                 popped = check.pop(0)
             else:
@@ -373,6 +377,10 @@ class Call:
 
             if popped:
                 await auto_clean(popped)
+
+            if not check and prev_track and await is_autoplay(chat_id):
+                await queue_smart_autoplay_track(chat_id, prev_track)
+                check = db.get(chat_id)
 
             if not check:
                 await _clear_(chat_id)
@@ -404,6 +412,7 @@ class Call:
             streamtype = check[0]["streamtype"]
             videoid = check[0]["vidid"]
             check[0]["played"] = 0
+            record_played_track(chat_id, check[0])
 
             exis = (check[0]).get("old_dur")
             if exis:
@@ -550,6 +559,17 @@ class Call:
                     db[chat_id][0]["markup"] = "tg"
 
             else:
+                if (
+                    not queued.startswith(("http://", "https://"))
+                    and not os.path.exists(queued)
+                    and is_valid_vidid(videoid)
+                ):
+                    fb_path, _ = await YouTube.download(
+                        videoid, None, videoid=videoid, video=video, title=title
+                    )
+                    if fb_path:
+                        queued = fb_path
+                        check[0]["file"] = fb_path
                 stream = dynamic_media_stream(path=queued, video=video)
                 try:
                     await client.play(chat_id, stream)

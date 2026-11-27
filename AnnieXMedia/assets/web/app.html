@@ -194,6 +194,36 @@
     display: none; box-shadow: 0 10px 28px rgba(0, 0, 0, 0.55);
   }
   .empty { text-align: center; color: var(--muted); padding: 20px 10px; font-size: 0.88rem; }
+  .seek-wrap { display: flex; align-items: center; gap: 8px; margin-top: 11px; }
+  .seek-time { font-size: 0.72rem; color: var(--muted); font-variant-numeric: tabular-nums; min-width: 34px; }
+  .seek-slider {
+    -webkit-appearance: none; appearance: none; flex: 1; height: 6px; padding: 0; border: none;
+    border-radius: 999px; background: rgba(196, 181, 253, 0.2); outline: none; cursor: pointer;
+  }
+  .seek-slider::-webkit-slider-thumb {
+    -webkit-appearance: none; appearance: none; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--accent2); border: 2px solid #fff; box-shadow: 0 0 10px var(--accent2);
+  }
+  .seek-slider:disabled { opacity: 0.55; cursor: default; }
+  .util-row { display: grid; grid-template-columns: repeat(3, 1fr); gap: 7px; margin-top: 8px; }
+  .util-row button { padding: 8px 6px; font-size: 0.75rem; border-radius: 11px; }
+  .util-row button.on { border-color: rgba(0, 245, 212, 0.55); color: var(--accent2); background: rgba(0, 245, 212, 0.12); }
+  .q-acts { display: flex; gap: 5px; flex-shrink: 0; align-items: center; }
+  .q-mini { padding: 4px 7px; font-size: 0.7rem; border-radius: 8px; line-height: 1; }
+  .lyrics-box {
+    max-height: 220px; overflow-y: auto; padding: 6px 4px; text-align: center;
+    scroll-behavior: smooth;
+  }
+  .lyr-line {
+    padding: 5px 8px; border-radius: 9px; font-size: 0.84rem; color: var(--muted);
+    transition: color .18s ease, background .18s ease, transform .18s ease;
+  }
+  .lyr-line.active {
+    color: #fff; font-weight: 800; background: rgba(255, 77, 148, 0.14);
+    text-shadow: 0 0 12px rgba(0, 245, 212, 0.35);
+  }
+  .sec-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 10px; gap: 8px; }
+  .sec-head .sec-title { margin: 0; }
 </style>
 </head>
 <body>
@@ -220,6 +250,14 @@
       <div class="sec-title">Voice Chat Sessions</div>
       <div id="sessionChips" class="chips"></div>
       <div id="playerArea"><div class="empty">Checking active Voice Chats…</div></div>
+    </div>
+    <div class="card" id="lyricsCard" style="display:none;">
+      <div class="sec-head">
+        <div class="sec-title">Live Synced Lyrics</div>
+        <button class="q-mini" onclick="toggleLyrics(false)">✕ Close</button>
+      </div>
+      <div id="lyricsMeta" style="font-size:0.75rem;color:var(--accent2);margin-bottom:6px;"></div>
+      <div id="lyricsBody" class="lyrics-box"><div class="empty">Loading lyrics…</div></div>
     </div>
     <div class="card">
       <div class="sec-title">Up Next Queue</div>
@@ -249,6 +287,13 @@
         <span class="chip" onclick="quickSearch('Alan Walker Faded')">EDM</span>
       </div>
       <div id="searchResults"><div class="empty">Search any song to stream directly into your Voice Chat.</div></div>
+    </div>
+    <div class="card" id="libraryCard">
+      <div class="sec-head">
+        <div class="sec-title">❤️ Saved Library &amp; Playlist</div>
+        <button class="cyan q-mini" onclick="playSavedPlaylist(this)">▶ Play All</button>
+      </div>
+      <div id="libraryList"><div class="empty">Tap ❤️ Save on any playing or searched song!</div></div>
     </div>
   </section>
 
@@ -330,6 +375,10 @@
         <div class="stat-box"><div class="stat-val" id="stCalls">-</div><div class="stat-lbl">Active Voice Chats</div></div>
         <div class="stat-box"><div class="stat-val" id="stChats">-</div><div class="stat-lbl">Served Groups</div></div>
         <div class="stat-box"><div class="stat-val" id="stUsers">-</div><div class="stat-lbl">Served Users</div></div>
+        <div class="stat-box"><div class="stat-val" id="stCacheTracks">-</div><div class="stat-lbl">TG Cached Tracks</div></div>
+        <div class="stat-box"><div class="stat-val" id="stCacheHits">-</div><div class="stat-lbl">Sub-1s Cache Hits</div></div>
+        <div class="stat-box"><div class="stat-val" id="stHeals">-</div><div class="stat-lbl">Self-Heal Fixes</div></div>
+        <div class="stat-box"><div class="stat-val" id="stBotHealth">-</div><div class="stat-lbl">Engine Health</div></div>
       </div>
     </div>
     <div class="card">
@@ -359,8 +408,28 @@ if (tg) {
 }
 
 const initData = tg ? (tg.initData || "") : "";
-let state = { sessions: [], selectedChatId: null, lbGame: "beats", searchTracks: [] };
+let state = {
+  sessions: [],
+  selectedChatId: null,
+  lbGame: "beats",
+  searchTracks: [],
+  library: [],
+  lyricsOpen: false,
+  lyricsTitle: "",
+  lyricsData: null,
+  localPlayed: 0,
+  localTotal: 0,
+  localPlaying: false,
+  seeking: false
+};
 let links = { channel: "https://t.me/privatethink", chat: "https://t.me/amrit_feel", owner: "https://t.me/ex_amrit" };
+
+function fmtSec(sec) {
+  const s = Math.max(0, Math.floor(sec || 0));
+  const m = Math.floor(s / 60);
+  const r = s % 60;
+  return m + ":" + (r < 10 ? "0" + r : r);
+}
 
 function esc(s) {
   return String(s == null ? "" : s)
@@ -400,6 +469,7 @@ function switchTab(name) {
     document.getElementById("nav-" + t).classList.toggle("active", t === name);
   });
   if (name === "games") loadMiniLB(state.lbGame);
+  else if (name === "search" && initData) loadLibrary();
 }
 
 async function api(path, opts = {}) {
@@ -435,6 +505,11 @@ function renderOverview(data) {
     document.getElementById("stCalls").textContent = data.stats.active_calls || 0;
     document.getElementById("stChats").textContent = data.stats.served_chats || 0;
     document.getElementById("stUsers").textContent = data.stats.served_users || 0;
+    document.getElementById("stCacheTracks").textContent = data.stats.cached_tracks ?? 0;
+    document.getElementById("stCacheHits").textContent = data.stats.cache_hits ?? 0;
+    const sh = data.stats.self_heal || {};
+    document.getElementById("stHeals").textContent = sh.recoveries ?? 0;
+    document.getElementById("stBotHealth").textContent = (sh.bot_connected && sh.db_ok) ? "Optimal" : "Recovering";
   }
 
   state.sessions = data.sessions || [];
@@ -465,27 +540,39 @@ function renderOverview(data) {
 
   const cur = state.sessions.find(s => s.chat_id === state.selectedChatId);
   if (!cur || !cur.active || !cur.current) {
+    state.localPlaying = false; state.localPlayed = 0; state.localTotal = 0;
     document.getElementById("playerArea").innerHTML = '<div class="empty">Voice Chat is idle in this group. Open the <strong>Play</strong> tab to start streaming!</div>';
     document.getElementById("queueList").innerHTML = '<div class="empty">Queue is empty.</div>';
     return;
   }
 
   const t = cur.current;
+  state.localPlaying = !!cur.playing;
+  state.localTotal = Math.max(0, t.total_sec || 0);
+  if (!state.seeking) state.localPlayed = Math.max(0, t.played_sec || 0);
+
   const thumb = t.vidid && /^[a-zA-Z0-9_-]{11}$/.test(t.vidid)
     ? `https://img.youtube.com/vi/${esc(t.vidid)}/hqdefault.jpg`
     : "https://files.catbox.moe/veykzq.jpg";
   const nextLoop = cur.loop === 0 ? 1 : (cur.loop === 1 ? 3 : 0);
   const dis = cur.can_control ? "" : "disabled";
+  const seekDis = (!cur.can_control || state.localTotal <= 12) ? "disabled" : "";
+  const hasVid = /^[a-zA-Z0-9_-]{11}$/.test(t.vidid || "");
 
   document.getElementById("playerArea").innerHTML = `
     <div class="now-playing">
       <img class="thumb" src="${thumb}" onerror="this.src='https://files.catbox.moe/veykzq.jpg'">
       <div class="np-meta">
         <div class="np-title">${esc(t.title)}</div>
-        <div class="np-sub">${esc(t.played)} / ${esc(t.duration)} • ${esc(t.streamtype.toUpperCase())}</div>
+        <div class="np-sub">${esc(t.by || "User")} • ${esc(t.streamtype.toUpperCase())}</div>
         <span class="badge ${cur.playing ? "" : "paused"}">${cur.playing ? "▶ Playing" : "⏸ Paused"}</span>
         ${cur.loop ? `<span class="badge" style="margin-left:5px;">🔁 Loop ${cur.loop}</span>` : ""}
       </div>
+    </div>
+    <div class="seek-wrap">
+      <span class="seek-time" id="seekTimeCur">${fmtSec(state.localPlayed)}</span>
+      <input type="range" class="seek-slider" id="seekSlider" min="0" max="${Math.max(1, state.localTotal)}" value="${Math.min(Math.max(1, state.localTotal), state.localPlayed)}" ${seekDis} oninput="onSeekInput(this.value)" onchange="commitSeek(this.value)">
+      <span class="seek-time" style="text-align:right;">${esc(t.duration)}</span>
     </div>
     <div class="controls">
       <button class="primary" ${dis} onclick="sendControl('${cur.playing ? "pause" : "resume"}')">${cur.playing ? "⏸ Pause" : "▶ Resume"}</button>
@@ -493,15 +580,31 @@ function renderOverview(data) {
       <button ${dis} onclick="sendControl('loop', ${nextLoop})">🔁 ${cur.loop ? "x" + cur.loop : "Off"}</button>
       <button class="danger" ${dis} onclick="sendControl('stop')">⏹ Stop</button>
     </div>
+    <div class="util-row">
+      <button class="${cur.autoplay ? "on" : ""}" ${dis} onclick="sendControl('autoplay')">📻 Autoplay ${cur.autoplay ? "ON" : "OFF"}</button>
+      <button class="${state.lyricsOpen ? "on" : ""}" onclick="toggleLyrics()">📜 Lyrics</button>
+      <button ${hasVid ? "" : "disabled"} onclick="saveCurrentTrack()">❤️ Save</button>
+    </div>
     ${cur.can_control ? "" : '<div class="sub" style="margin-top:8px;">Admin rights required in this group to control playback.</div>'}
   `;
 
+  if (state.lyricsOpen && t.title && t.title !== state.lyricsTitle) {
+    loadLyrics(t.title);
+  }
+  syncLyricsHighlight();
+
   const qEl = document.getElementById("queueList");
   if (!cur.queue || !cur.queue.length) {
-    qEl.innerHTML = '<div class="empty">No upcoming tracks queued.</div>';
+    qEl.innerHTML = `<div class="empty">${cur.autoplay ? "Queue empty — Smart Autoplay Radio will pick the next song!" : "No upcoming tracks queued."}</div>`;
   } else {
-    qEl.innerHTML = cur.queue.map((item, i) =>
-      `<div class="q-item"><div class="q-item-title">${i + 1}. ${esc(item.title)}</div><span style="color:var(--muted);font-size:0.76rem;">${esc(item.duration)}</span></div>`
+    qEl.innerHTML = cur.queue.map((item, i) => `
+      <div class="q-item">
+        <div class="q-item-title">${i + 1}. ${esc(item.title)}</div>
+        <div class="q-acts">
+          <span style="color:var(--muted);font-size:0.75rem;">${esc(item.duration)}</span>
+          ${cur.can_control ? `<button class="q-mini" title="Play Next" onclick="sendControl('move_top', ${i + 1})">▲</button><button class="q-mini" title="Remove" onclick="sendControl('remove', ${i + 1})">✕</button>` : ""}
+        </div>
+      </div>`
     ).join("");
   }
 }
@@ -550,6 +653,7 @@ async function runSearch() {
         <div class="res-actions">
           <button class="primary" onclick="playTrackIdx(${idx}, false, this)">▶ Audio</button>
           <button onclick="playTrackIdx(${idx}, true, this)">🎬 Video</button>
+          <button onclick="saveSearchTrack(${idx}, this)">❤️ Save</button>
         </div>
       </div>
     `).join("");
@@ -625,7 +729,179 @@ document.getElementById("searchInput").addEventListener("keydown", e => {
   }
 })();
 
+function onSeekInput(val) {
+  state.seeking = true;
+  state.localPlayed = parseInt(val, 10) || 0;
+  const el = document.getElementById("seekTimeCur");
+  if (el) el.textContent = fmtSec(state.localPlayed);
+}
+
+async function commitSeek(val) {
+  const target = parseInt(val, 10) || 0;
+  state.seeking = false;
+  await sendControl("seek", target);
+}
+
+function toggleLyrics(force) {
+  state.lyricsOpen = typeof force === "boolean" ? force : !state.lyricsOpen;
+  const card = document.getElementById("lyricsCard");
+  if (card) card.style.display = state.lyricsOpen ? "block" : "none";
+  const cur = state.sessions.find(s => s.chat_id === state.selectedChatId);
+  if (state.lyricsOpen && cur && cur.current) loadLyrics(cur.current.title);
+}
+
+async function loadLyrics(title) {
+  if (!title) return;
+  state.lyricsTitle = title;
+  const bodyEl = document.getElementById("lyricsBody");
+  const metaEl = document.getElementById("lyricsMeta");
+  bodyEl.innerHTML = '<div class="empty">Searching lyrics…</div>';
+  metaEl.textContent = title;
+  try {
+    const data = await api("/api/lyrics?title=" + encodeURIComponent(title));
+    state.lyricsData = data;
+    if (!data.found) {
+      bodyEl.innerHTML = '<div class="empty">Lyrics not available for this track.</div>';
+      return;
+    }
+    metaEl.textContent = (data.artist ? data.artist + " — " : "") + (data.title || title);
+    if (data.synced && data.lines && data.lines.length) {
+      bodyEl.innerHTML = data.lines.map((ln, idx) =>
+        `<div class="lyr-line" id="lyr-${idx}" data-t="${ln.time_sec}">${esc(ln.text)}</div>`
+      ).join("");
+      syncLyricsHighlight();
+    } else {
+      bodyEl.innerHTML = (data.plain || "").split("\n").map(l =>
+        `<div class="lyr-line">${esc(l || "♪")}</div>`
+      ).join("");
+    }
+  } catch (e) {
+    bodyEl.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
+  }
+}
+
+function syncLyricsHighlight() {
+  if (!state.lyricsOpen || !state.lyricsData || !state.lyricsData.synced) return;
+  const lines = state.lyricsData.lines || [];
+  let activeIdx = -1;
+  for (let i = 0; i < lines.length; i++) {
+    if (lines[i].time_sec <= state.localPlayed + 0.4) activeIdx = i;
+    else break;
+  }
+  lines.forEach((_, i) => {
+    const el = document.getElementById("lyr-" + i);
+    if (!el) return;
+    const isAct = i === activeIdx;
+    el.classList.toggle("active", isAct);
+    if (isAct && el.scrollIntoView) el.scrollIntoView({ block: "center", behavior: "smooth" });
+  });
+}
+
+async function saveTrackPayload(vidid, title, duration, thumb) {
+  haptic("light");
+  try {
+    const res = await api("/api/playlists/save", {
+      method: "POST",
+      body: JSON.stringify({ vidid, title, duration, thumb })
+    });
+    state.library = res.tracks || [];
+    renderLibrary();
+    showToast("❤️ Saved to Library");
+  } catch (e) { showToast(e.message); }
+}
+
+function saveCurrentTrack() {
+  const cur = state.sessions.find(s => s.chat_id === state.selectedChatId);
+  if (!cur || !cur.current) return;
+  const t = cur.current;
+  saveTrackPayload(t.vidid, t.title, t.duration, "");
+}
+
+function saveSearchTrack(idx, btn) {
+  const tr = state.searchTracks[idx];
+  if (!tr) return;
+  saveTrackPayload(tr.vidid, tr.title, tr.duration, tr.thumb);
+  if (btn) btn.textContent = "✅ Saved";
+}
+
+function renderLibrary() {
+  const el = document.getElementById("libraryList");
+  if (!el) return;
+  if (!state.library.length) {
+    el.innerHTML = '<div class="empty">Tap ❤️ Save on any playing or searched song!</div>';
+    return;
+  }
+  el.innerHTML = state.library.map((tr, idx) => `
+    <div class="q-item">
+      <div class="q-item-title">${esc(tr.title)} <span style="color:var(--muted);font-size:0.74rem;">(${esc(tr.duration)})</span></div>
+      <div class="q-acts">
+        <button class="q-mini primary" onclick="playSavedIdx(${idx}, this)">▶</button>
+        <button class="q-mini" onclick="removeSavedVid('${esc(tr.vidid)}')">✕</button>
+      </div>
+    </div>`
+  ).join("");
+}
+
+async function loadLibrary() {
+  try {
+    const data = await api("/api/playlists");
+    state.library = data.tracks || [];
+    renderLibrary();
+  } catch (e) {}
+}
+
+async function removeSavedVid(vidid) {
+  try {
+    const res = await api("/api/playlists/delete", { method: "POST", body: JSON.stringify({ vidid }) });
+    state.library = res.tracks || [];
+    renderLibrary();
+    showToast("Removed from Library");
+  } catch (e) { showToast(e.message); }
+}
+
+async function playSavedIdx(idx, btn) {
+  const tr = state.library[idx];
+  if (!tr) return;
+  const target = document.getElementById("manualChatId").value.trim() || document.getElementById("targetSelect").value;
+  if (!target) return showToast("Select a group or enter its Chat ID (-100...)");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api("/api/play", {
+      method: "POST",
+      body: JSON.stringify({ chat_id: target, query: tr.link, vidid: tr.vidid, title: tr.title, duration: tr.duration, thumb: tr.thumb, video: false })
+    });
+    showToast((res.status === "queued" ? "Queued #" + res.position : "Now Playing") + ": " + res.title);
+    await refreshOverview();
+    switchTab("player");
+  } catch (e) { showToast(e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+
+async function playSavedPlaylist(btn) {
+  const target = document.getElementById("manualChatId").value.trim() || document.getElementById("targetSelect").value;
+  if (!target) return showToast("Select a group or enter its Chat ID (-100...)");
+  if (btn) btn.disabled = true;
+  try {
+    const res = await api("/api/playlists/play", { method: "POST", body: JSON.stringify({ chat_id: target }) });
+    showToast("▶ Queued " + (res.queued_count || 0) + " saved tracks!");
+    await refreshOverview();
+    switchTab("player");
+  } catch (e) { showToast(e.message); }
+  finally { if (btn) btn.disabled = false; }
+}
+
 refreshOverview();
+if (initData) loadLibrary();
+setInterval(() => {
+  if (state.localPlaying && !state.seeking && state.localTotal > 0 && state.localPlayed < state.localTotal) {
+    state.localPlayed += 1;
+    const tEl = document.getElementById("seekTimeCur");
+    const sEl = document.getElementById("seekSlider");
+    if (tEl) tEl.textContent = fmtSec(state.localPlayed);
+    if (sEl) sEl.value = String(state.localPlayed);
+    syncLyricsHighlight();
+  }
+}, 1000);
 setInterval(() => {
   if (document.getElementById("tab-player").classList.contains("active")) refreshOverview();
 }, 4000);

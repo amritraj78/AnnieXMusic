@@ -5,7 +5,7 @@ import json
 import re
 import time
 from typing import Any, Dict, List, Optional, Tuple
-from urllib.parse import parse_qs
+from urllib.parse import parse_qs, quote
 
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.types import InlineKeyboardMarkup
@@ -15,9 +15,14 @@ import config
 from AnnieXMedia import YouTube, app
 from AnnieXMedia.core.call import StreamController
 from AnnieXMedia.core.mongo import mongodb
+from AnnieXMedia.core.prefetch import clean_song_title
+from AnnieXMedia.core.self_heal import get_health_snapshot
+from AnnieXMedia.core.track_cache import stats as cache_stats, track_cachedb
 from AnnieXMedia.core.webapp_auth import verify_game_launch, verify_telegram_init_data
 from AnnieXMedia.misc import SUDOERS, _boot_, db
 from AnnieXMedia.utils.database import (
+    autoplay_off,
+    autoplay_on,
     get_active_chats,
     get_authuser_names,
     get_lang,
@@ -25,6 +30,7 @@ from AnnieXMedia.utils.database import (
     get_playtype,
     group_assistant,
     is_active_chat,
+    is_autoplay,
     is_banned_user,
     is_gbanned_user,
     is_maintenance,
@@ -36,13 +42,17 @@ from AnnieXMedia.utils.database import (
 )
 from AnnieXMedia.utils.formatters import int_to_alpha, seconds_to_min
 from AnnieXMedia.utils.inline import aq_markup, stream_markup
-from AnnieXMedia.utils.security import is_safe_http_url, redact_secrets
+from AnnieXMedia.utils.security import fetch_url_limited, is_safe_http_url, redact_secrets
+from AnnieXMedia.utils.stream.autoclear import auto_clean
 from AnnieXMedia.utils.stream.queue import put_queue
 from AnnieXMedia.utils.thumbnails import get_thumb
 from config import BANNED_USERS, time_to_seconds
 from strings import get_string
 
 _YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+_LRC_LINE_RE = re.compile(r"^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$")
+_LYRICS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
+playlistsdb = mongodb.user_playlists
 _RATE_BUCKETS: Dict[Tuple[int, str], List[float]] = {}
 
 
@@ -208,12 +218,18 @@ async def _handle_overview(headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]
                     "active": is_active,
                     "playing": await is_music_playing(cid) if is_active else False,
                     "loop": await get_loop(cid) if is_active else 0,
+                    "autoplay": await is_autoplay(cid),
                     "current": _serialize_track(q_items[0]) if q_items else None,
                     "queue": [_serialize_track(t) for t in q_items[1:12]] if len(q_items) > 1 else [],
                     "queue_count": len(q_items),
                     "can_control": can_ctrl,
                 }
             )
+
+    try:
+        cached_tracks = await track_cachedb.count_documents({})
+    except Exception:
+        cached_tracks = 0
 
     return 200, {
         "authenticated": bool(user),
@@ -237,6 +253,9 @@ async def _handle_overview(headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]
             "active_calls": len(active_ids),
             "served_chats": served_chats,
             "served_users": served_users,
+            "cached_tracks": cached_tracks,
+            "cache_hits": cache_stats["tg_hits"] + cache_stats["disk_hits"],
+            "self_heal": get_health_snapshot(),
         },
         "sessions": sessions,
     }
@@ -456,6 +475,17 @@ async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tupl
     is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
     if not is_member or not can_ctrl:
         return 403, {"error": "Admin rights required for this voice chat."}
+
+    if action == "autoplay":
+        val = body.get("value")
+        cur = await is_autoplay(chat_id)
+        target = (not cur) if val is None else bool(val)
+        if target:
+            await autoplay_on(chat_id)
+        else:
+            await autoplay_off(chat_id)
+        return 200, {"ok": True, "action": "autoplay", "enabled": target}
+
     if not await is_active_chat(chat_id):
         return 404, {"error": "No active voice chat stream in that group."}
 
@@ -492,6 +522,57 @@ async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tupl
                 return 400, {"error": "Invalid loop value."}
             await set_loop(chat_id, val)
             return 200, {"ok": True, "action": "loop", "value": val}
+
+        if action == "seek":
+            playing = db.get(chat_id) or []
+            if not playing or not isinstance(playing[0], dict):
+                return 404, {"error": "No active track to seek."}
+            try:
+                dur_sec = int(playing[0].get("seconds") or 0)
+            except (TypeError, ValueError):
+                dur_sec = 0
+            if dur_sec <= 12:
+                return 400, {"error": "Track duration is too short or live to seek."}
+            try:
+                target_sec = max(1, min(dur_sec - 5, int(body.get("value", 0))))
+            except (TypeError, ValueError):
+                return 400, {"error": "Invalid seek timestamp."}
+            file_path = str(playing[0].get("file") or "")
+            if "vid_" in file_path:
+                n, stream_link = await YouTube.video(playing[0]["vidid"], True)
+                if n == 0 or not stream_link:
+                    return 400, {"error": "Could not resolve seekable stream."}
+                file_path = stream_link
+            if playing[0].get("speed_path"):
+                file_path = str(playing[0]["speed_path"])
+            if "index_" in file_path:
+                file_path = str(playing[0]["vidid"])
+            await StreamController.seek_stream(
+                chat_id,
+                file_path,
+                seconds_to_min(target_sec),
+                str(playing[0].get("dur") or seconds_to_min(dur_sec)),
+                str(playing[0].get("streamtype") or "audio"),
+            )
+            playing[0]["played"] = target_sec
+            return 200, {"ok": True, "action": "seek", "played_sec": target_sec}
+
+        if action in ("remove", "move_top"):
+            q_list = db.get(chat_id) or []
+            try:
+                q_idx = int(body.get("value", -1))
+            except (TypeError, ValueError):
+                return 400, {"error": "Invalid queue position."}
+            if q_idx < 1 or q_idx >= len(q_list):
+                return 404, {"error": "Queued track not found."}
+            if action == "remove":
+                removed = q_list.pop(q_idx)
+                await auto_clean(removed)
+                return 200, {"ok": True, "action": "removed"}
+            if q_idx > 1:
+                moved = q_list.pop(q_idx)
+                q_list.insert(1, moved)
+            return 200, {"ok": True, "action": "moved_top"}
 
         return 400, {"error": "Unsupported action."}
     except Exception as exc:
@@ -558,6 +639,216 @@ async def _handle_game_score(headers: Dict[str, str], body: Dict[str, Any]) -> T
     return 200, {"ok": True, **lb}
 
 
+async def _handle_lyrics(query_str: str, headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]]:
+    auth = _auth_user(headers)
+    rl_uid = int(auth["user"]["id"]) if auth else 0
+    if not _check_rate_limit(rl_uid, "lyrics", 30, 60.0):
+        return 429, {"error": "Too many lyrics requests. Wait a moment."}
+
+    params = parse_qs(query_str)
+    raw_title = (params.get("title") or [""])[0].strip()
+    if len(raw_title) < 2 or len(raw_title) > 150:
+        return 400, {"error": "Provide a valid track title."}
+
+    cleaned = clean_song_title(raw_title)
+    cache_key = cleaned.lower()
+    now = time.time()
+    if cached := _LYRICS_CACHE.get(cache_key):
+        if now - cached[0] < 3600:
+            return 200, cached[1]
+        _LYRICS_CACHE.pop(cache_key, None)
+
+    url = f"https://lrclib.net/api/search?q={quote(cleaned)}"
+    ok, status, _, body_bytes = await fetch_url_limited(
+        url,
+        max_bytes=512 * 1024,
+        timeout=6.0,
+        headers={"User-Agent": "AnnieXMusic/2.0 (https://t.me/ritulavbot)"},
+    )
+    if not ok or status >= 400 or not body_bytes:
+        return 200, {"ok": True, "found": False, "title": cleaned, "lines": [], "plain": ""}
+
+    try:
+        items = json.loads(body_bytes.decode("utf-8", errors="ignore"))
+    except Exception:
+        items = []
+
+    best = None
+    if isinstance(items, list):
+        best = next(
+            (it for it in items if isinstance(it, dict) and (it.get("syncedLyrics") or it.get("plainLyrics"))),
+            None,
+        )
+    if not best:
+        res = {"ok": True, "found": False, "title": cleaned, "lines": [], "plain": ""}
+        if len(_LYRICS_CACHE) >= 256:
+            _LYRICS_CACHE.pop(next(iter(_LYRICS_CACHE)), None)
+        _LYRICS_CACHE[cache_key] = (now, res)
+        return 200, res
+
+    synced_raw = str(best.get("syncedLyrics") or "")
+    lines: List[Dict[str, Any]] = []
+    for raw_ln in synced_raw.splitlines():
+        m = _LRC_LINE_RE.match(raw_ln.strip())
+        if not m:
+            continue
+        mins = int(m.group(1))
+        secs = int(m.group(2))
+        frac_str = m.group(3) or "0"
+        frac = int(frac_str) / (10 ** len(frac_str))
+        txt = m.group(4).strip()
+        if txt:
+            lines.append({"time_sec": round(mins * 60 + secs + frac, 2), "text": txt})
+
+    plain_raw = str(best.get("plainLyrics") or "").strip()
+    if not plain_raw and lines:
+        plain_raw = "\n".join(x["text"] for x in lines)
+
+    res = {
+        "ok": True,
+        "found": bool(lines or plain_raw),
+        "title": str(best.get("trackName") or cleaned),
+        "artist": str(best.get("artistName") or ""),
+        "synced": bool(lines),
+        "lines": lines[:200],
+        "plain": plain_raw[:6000],
+    }
+    if len(_LYRICS_CACHE) >= 256:
+        _LYRICS_CACHE.pop(next(iter(_LYRICS_CACHE)), None)
+    _LYRICS_CACHE[cache_key] = (now, res)
+    return 200, res
+
+
+async def _handle_playlists_get(headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]]:
+    auth = _auth_user(headers)
+    if not auth:
+        return 401, {"error": "Open inside Telegram to access your Saved Tracks."}
+    uid = int(auth["user"]["id"])
+    doc = await playlistsdb.find_one({"user_id": uid})
+    tracks = list((doc or {}).get("tracks") or [])[:50]
+    return 200, {"ok": True, "tracks": tracks}
+
+
+async def _handle_playlist_save(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    auth = _auth_user(headers)
+    if not auth:
+        return 401, {"error": "Telegram authentication required."}
+    uid = int(auth["user"]["id"])
+    if not _check_rate_limit(uid, "pl_write", 30, 60.0):
+        return 429, {"error": "Too many playlist edits. Slow down."}
+
+    vidid = str(body.get("vidid") or "").strip()
+    title = str(body.get("title") or "").strip()[:120]
+    duration = str(body.get("duration") or "0:00").strip()[:16]
+    thumb = str(body.get("thumb") or "").strip()[:260]
+    if not _YOUTUBE_ID_RE.match(vidid) or not title:
+        return 400, {"error": "Valid YouTube track vidid and title are required."}
+
+    if not thumb or not await is_safe_http_url(thumb):
+        thumb = f"https://img.youtube.com/vi/{vidid}/hqdefault.jpg"
+
+    doc = await playlistsdb.find_one({"user_id": uid})
+    tracks = [t for t in ((doc or {}).get("tracks") or []) if isinstance(t, dict) and t.get("vidid") != vidid]
+    tracks.insert(
+        0,
+        {
+            "vidid": vidid,
+            "title": title,
+            "duration": duration,
+            "thumb": thumb,
+            "link": f"https://www.youtube.com/watch?v={vidid}",
+        },
+    )
+    tracks = tracks[:50]
+    await playlistsdb.update_one(
+        {"user_id": uid},
+        {"$set": {"tracks": tracks, "updated_at": int(time.time())}},
+        upsert=True,
+    )
+    return 200, {"ok": True, "tracks": tracks}
+
+
+async def _handle_playlist_delete(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    auth = _auth_user(headers)
+    if not auth:
+        return 401, {"error": "Telegram authentication required."}
+    uid = int(auth["user"]["id"])
+    vidid = str(body.get("vidid") or "").strip()
+    if not _YOUTUBE_ID_RE.match(vidid):
+        return 400, {"error": "Valid track vidid is required."}
+
+    doc = await playlistsdb.find_one({"user_id": uid})
+    tracks = [t for t in ((doc or {}).get("tracks") or []) if isinstance(t, dict) and t.get("vidid") != vidid]
+    await playlistsdb.update_one(
+        {"user_id": uid},
+        {"$set": {"tracks": tracks, "updated_at": int(time.time())}},
+        upsert=True,
+    )
+    return 200, {"ok": True, "tracks": tracks}
+
+
+async def _handle_playlist_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    auth = _auth_user(headers)
+    if not auth:
+        return 401, {"error": "Telegram authentication required."}
+    user = auth["user"]
+    uid = int(user["id"])
+    if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
+        return 403, {"error": "You are banned from using this bot."}
+    if not _check_rate_limit(uid, "play", 8, 60.0):
+        return 429, {"error": "Too many play requests. Please slow down."}
+
+    chat_id = await _parse_target_chat(body.get("chat_id"))
+    if not chat_id or chat_id >= 0:
+        return 400, {"error": "Valid group chat ID (-100...) is required."}
+    is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
+    if not is_member:
+        return 403, {"error": "You must be a member of that group to queue music."}
+    if await get_playtype(chat_id) != "Everyone" and not can_ctrl:
+        return 403, {"error": "Only admins can play music in this group."}
+
+    doc = await playlistsdb.find_one({"user_id": uid})
+    saved_tracks = list((doc or {}).get("tracks") or [])[:10]
+    if not saved_tracks:
+        return 404, {"error": "Your Saved Library is empty."}
+
+    user_name = html.escape(_display_name(user))
+    user_mention = f"<a href='tg://user?id={uid}'>{user_name}</a>"
+    queued_count = 0
+
+    for item in saved_tracks:
+        vid = str(item.get("vidid") or "").strip()
+        if not _YOUTUBE_ID_RE.match(vid):
+            continue
+        t_title = str(item.get("title") or vid).title()
+        t_dur = str(item.get("duration") or "3:30")
+        if await is_active_chat(chat_id):
+            await put_queue(chat_id, chat_id, f"vid_{vid}", t_title, t_dur, user_mention, vid, uid, "audio")
+            queued_count += 1
+        else:
+            file_path, direct = await YouTube.download(vid, None, video=False, videoid=vid, title=t_title)
+            if not file_path:
+                continue
+            db[chat_id] = []
+            await StreamController.join_call(chat_id, chat_id, file_path, video=False)
+            await put_queue(
+                chat_id,
+                chat_id,
+                file_path if direct else f"vid_{vid}",
+                t_title,
+                t_dur,
+                user_mention,
+                vid,
+                uid,
+                "audio",
+            )
+            queued_count += 1
+
+    if queued_count == 0:
+        return 502, {"error": "Could not start saved playlist tracks."}
+    return 200, {"ok": True, "queued_count": queued_count}
+
+
 async def handle_api_request(
     method: str,
     path: str,
@@ -583,6 +874,16 @@ async def handle_api_request(
         return await _handle_play(headers, body)
     if path == "/api/control" and method == "POST":
         return await _handle_control(headers, body)
+    if path == "/api/lyrics" and method == "GET":
+        return await _handle_lyrics(query_str, headers)
+    if path == "/api/playlists" and method == "GET":
+        return await _handle_playlists_get(headers)
+    if path == "/api/playlists/save" and method == "POST":
+        return await _handle_playlist_save(headers, body)
+    if path == "/api/playlists/delete" and method == "POST":
+        return await _handle_playlist_delete(headers, body)
+    if path == "/api/playlists/play" and method == "POST":
+        return await _handle_playlist_play(headers, body)
     if path == "/api/games/leaderboard" and method == "GET":
         params = parse_qs(query_str)
         game = (params.get("game") or ["beats"])[0]

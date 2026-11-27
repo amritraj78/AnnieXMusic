@@ -1,0 +1,19 @@
+[Unit]
+Description=AnnieXMusic Telegram Bot + Mini App + Self-Heal Supervisor
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/AnnieXMusic
+ExecStart=/usr/bin/python3 -m AnnieXMedia
+Restart=always
+RestartSec=5
+StartLimitIntervalSec=0
+EnvironmentFile=/opt/AnnieXMusic/.env
+LimitNOFILE=65536
+MemoryHigh=1500M
+OOMPolicy=restart
+
+[Install]
+WantedBy=multi-user.target

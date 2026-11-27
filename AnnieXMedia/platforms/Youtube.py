@@ -15,6 +15,12 @@ from youtubesearchpython.aio import VideosSearch, Playlist
 
 from AnnieXMedia.core.http_pool import get_http_session
 from AnnieXMedia.core.security import is_safe_http_url
+from AnnieXMedia.core.self_heal import note_download_failure, reset_download_failures
+from AnnieXMedia.core.track_cache import (
+    download_from_tg_cache,
+    is_valid_vidid,
+    schedule_cache_upload,
+)
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
 from AnnieXMedia.utils.database import is_on_off
 from AnnieXMedia.utils.downloader import extract_video_id, yt_dlp_download
@@ -463,6 +469,16 @@ class YouTubeAPI:
         title: Optional[str] = None,
     ) -> Union[Tuple[str, Optional[bool]], Tuple[None, None]]:
         link = self._prepare_link(link, videoid)
+        vid = extract_video_id(link)
+        is_video = bool(video)
+
+        # Serve from local disk or Telegram file_id cache (< 1s) before any YouTube lookup
+        if is_valid_vidid(vid):
+            cached_path = await download_from_tg_cache(vid, is_video=is_video, title=str(title or ""))
+            if cached_path:
+                reset_download_failures()
+                return cached_path, True
+
         resolved_title = await self._resolve_title(link, title)
 
         if video:
@@ -474,7 +490,12 @@ class YouTubeAPI:
 
             if await is_on_off(1):
                 p = await yt_dlp_download(link, type="video", title=resolved_title)
-                return (p, True) if p else (None, None)
+                if p:
+                    reset_download_failures()
+                    schedule_cache_upload(vid, p, title=resolved_title, is_video=True)
+                    return p, True
+                note_download_failure()
+                return None, None
 
             if await self.exists(link) and await is_safe_http_url(link):
                 stdout, _ = await _exec_proc(
@@ -489,7 +510,17 @@ class YouTubeAPI:
                 if stdout:
                     return stdout.decode("utf-8", errors="replace").split("\n")[0], None
             p = await yt_dlp_download(link, type="video", title=resolved_title)
-            return (p, True) if p else (None, None)
+            if p:
+                reset_download_failures()
+                schedule_cache_upload(vid, p, title=resolved_title, is_video=True)
+                return p, True
+            note_download_failure()
+            return None, None
 
         p = await yt_dlp_download(link, type="audio", title=resolved_title)
-        return (p, True) if p else (None, None)
+        if p:
+            reset_download_failures()
+            schedule_cache_upload(vid, p, title=resolved_title, is_video=False)
+            return p, True
+        note_download_failure()
+        return None, None
