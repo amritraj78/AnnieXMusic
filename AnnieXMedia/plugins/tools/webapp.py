@@ -8,14 +8,13 @@ from pyrogram.types import (
     CallbackQuery,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
-    MenuButtonWebApp,
     Message,
     WebAppInfo,
 )
 
 import config
 from AnnieXMedia import app
-from AnnieXMedia.core.webapp_auth import sign_game_launch
+from AnnieXMedia.core.webapp_auth import set_webapp_menu_button, sign_game_launch
 from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.misc import SUDOERS
 from config import BANNED_USERS
@@ -147,12 +146,7 @@ async def game_callback(_, query: CallbackQuery):
 async def cmd_setmenubutton(_, message: Message):
     """Set the bot's menu button to open the Mini App."""
     try:
-        await app.set_chat_menu_button(
-            menu_button=MenuButtonWebApp(
-                text="🎵 Open App",
-                web_app=WebAppInfo(url=f"{_WEBAPP_URL}/app"),
-            )
-        )
+        await set_webapp_menu_button(app, f"{_WEBAPP_URL}/app")
         await message.reply_text("✅ Menu button updated! Tap **🎵 Open App** in private chat.")
     except Exception as e:
         await message.reply_text(f"❌ Failed to set menu button:\n`{e}`")

@@ -2,7 +2,6 @@
 import sys
 from pyrogram import Client, errors
 from pyrogram.enums import ChatMemberStatus
-from pyrogram.types import MenuButtonWebApp, WebAppInfo
 
 import config
 from ..logging import LOGGER
@@ -58,12 +57,9 @@ class MusicBotClient(Client):
 
         if config.WEBAPP_URL.startswith("https://"):
             try:
-                await self.set_chat_menu_button(
-                    menu_button=MenuButtonWebApp(
-                        text="🎵 Open App",
-                        web_app=WebAppInfo(url=f"{config.WEBAPP_URL}/app"),
-                    )
-                )
+                from AnnieXMedia.core.webapp_auth import set_webapp_menu_button
+
+                await set_webapp_menu_button(self, f"{config.WEBAPP_URL}/app")
                 LOGGER(__name__).info(f"🌐 Telegram WebApp Menu Button set to {config.WEBAPP_URL}/app")
             except Exception as e:
                 LOGGER(__name__).warning(f"⚠️ Could not set WebApp Menu Button: {e}")

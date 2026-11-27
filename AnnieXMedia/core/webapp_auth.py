@@ -127,3 +127,15 @@ def verify_game_launch(
         return payload
     except Exception:
         return None
+
+
+async def set_webapp_menu_button(client: Any, app_url: str, text: str = "🎵 Open App") -> None:
+    """Set default bot WebApp menu button using InputUserSelf (avoids Kurigram InputPeerSelf bug)."""
+    from pyrogram import raw
+
+    await client.invoke(
+        raw.functions.bots.SetBotMenuButton(
+            user_id=raw.types.InputUserSelf(),
+            button=raw.types.BotMenuButton(text=text, url=app_url),
+        )
+    )
