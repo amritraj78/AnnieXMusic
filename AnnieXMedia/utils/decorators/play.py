@@ -1,5 +1,7 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import time
+from typing import Dict, Tuple
 
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import (
@@ -26,8 +28,18 @@ from AnnieXMedia.utils.database import (
 )
 from AnnieXMedia.utils.inline import botplaylist_markup
 
-# Cache for invite links per chat
+# Cache for invite links per chat and lightweight per-user cooldown
 links = {}
+_play_cooldown: Dict[Tuple[int, int], float] = {}
+_PLAY_COOLDOWN_SEC = 2.5
+
+
+async def _delete_after(msg, delay: float = 4.0) -> None:
+    await asyncio.sleep(delay)
+    try:
+        await msg.delete()
+    except Exception:
+        pass
 
 
 def PlayWrapper(command):
@@ -54,6 +66,21 @@ def PlayWrapper(command):
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
                     link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
+
+        if message.from_user and message.from_user.id not in SUDOERS:
+            now = time.monotonic()
+            key = (message.chat.id, message.from_user.id)
+            last_ts = _play_cooldown.get(key, 0.0)
+            if now - last_ts < _PLAY_COOLDOWN_SEC:
+                warn = await message.reply_text("⏳ Please wait a couple seconds before queueing another track.")
+                asyncio.create_task(_delete_after(warn, 4.0))
+                return
+            if len(_play_cooldown) > 2048:
+                cutoff = now - 60.0
+                for k, v in list(_play_cooldown.items()):
+                    if v < cutoff:
+                        _play_cooldown.pop(k, None)
+            _play_cooldown[key] = now
 
         try:
             await message.delete()

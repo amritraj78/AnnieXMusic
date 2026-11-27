@@ -8,17 +8,31 @@ from pytgcalls.exceptions import NoActiveGroupCall
 import config
 from AnnieXMedia import LOGGER, app, userbot
 from AnnieXMedia.core.call import StreamController
+from AnnieXMedia.core.dir import prune_storage_cache
+from AnnieXMedia.core.mongo import ensure_indexes
 from AnnieXMedia.core.server import start_web_server, stop_web_server
 from AnnieXMedia.misc import sudo
 from AnnieXMedia.plugins import ALL_MODULES
 from AnnieXMedia.utils.database import get_banned_users, get_gbanned
 from AnnieXMedia.utils.cookie_handler import fetch_and_store_cookies
+from AnnieXMedia.utils.downloader import close_http_session
 from config import BANNED_USERS
 
 
+async def _periodic_storage_cleanup(interval_seconds: int = 1800):
+    while True:
+        await asyncio.sleep(interval_seconds)
+        try:
+            await asyncio.to_thread(prune_storage_cache)
+        except Exception:
+            pass
+
+
 async def init():
-    # Start healthcheck web server for Koyeb / Render / PaaS deployment
+    # Start healthcheck & Mini App web server for Koyeb / Render / PaaS deployment
     await start_web_server()
+    await ensure_indexes()
+    prune_storage_cache(max_age_seconds=3600)
 
     if (
         not config.STRING1
@@ -70,14 +84,19 @@ async def init():
         LOGGER("AnnieXMedia").warning(f"Initial logger call test skipped: {e}")
 
     await StreamController.decorators()
+    cleanup_task = asyncio.create_task(_periodic_storage_cleanup())
     LOGGER("AnnieXMedia").info(
         "\x41\x6e\x6e\x69\x65\x20\x4d\x75\x73\x69\x63\x20\x52\x6f\x62\x6f\x74\x20\x53\x74\x61\x72\x74\x65\x64\x20\x53\x75\x63\x63\x65\x73\x73\x66\x75\x6c\x6c\x79\x2e\x2e\x2e"
     )
-    await idle()
-    await app.stop()
-    await userbot.stop()
-    await stop_web_server()
-    LOGGER("AnnieXMedia").info("sᴛᴏᴘᴘɪɴɢ ᴀɴɴɪᴇ ᴍᴜsɪᴄ ʙᴏᴛ ...")
+    try:
+        await idle()
+    finally:
+        cleanup_task.cancel()
+        await app.stop()
+        await userbot.stop()
+        await close_http_session()
+        await stop_web_server()
+        LOGGER("AnnieXMedia").info("sᴛᴏᴘᴘɪɴɢ ᴀɴɴɪᴇ ᴍᴜsɪᴄ ʙᴏᴛ ...")
 
 
 if __name__ == "__main__":

@@ -2,6 +2,7 @@
 import asyncio
 import contextlib
 import glob
+import html
 import os
 import re
 from typing import Dict, List, Optional, Tuple
@@ -219,7 +220,7 @@ _NOISE_BRACKETS_RE = re.compile(
     re.I,
 )
 _NOISE_WORDS_RE = re.compile(
-    r"\b(official(\s+music)?(\s+video)?|lyrical|lyric\s*video|lyrics|full\s*(song|video|audio)|music\s*video|video\s*song|audio\s*song|4k|uhd|full\s*hd|t-series|zee\s*music(\s*company)?|yrf|sony\s*music(\s*india)?|tips\s*official|speed\s*records|vevo)\b",
+    r"\b(official(\s+music)?(\s+video)?|lyrical|lyric\s*video|lyrics|full\s*(video\s+)?(song|video|audio)|music\s*video|video\s*song|audio\s*song|song\s+with\s+lyrics|4k|uhd|full\s*hd|t-series|zee\s*music(\s*company)?|yrf|sony\s*music(\s*india)?|tips\s*official|speed\s*records|vevo)\b",
     re.I,
 )
 _VARIANT_TOKENS = {
@@ -228,6 +229,12 @@ _VARIANT_TOKENS = {
     "ringtone", "reaction", "teaser", "trailer", "tutorial", "dj",
 }
 _AUDIUS_API = "https://api.audius.co"
+_JIOSAAVN_SUMIT_API = "https://saavn.sumit.co"
+_JIOSAAVN_OFFICIAL_API = "https://www.jiosaavn.com/api.php"
+_JIOSAAVN_HEADERS = {
+    "Referer": "https://www.jiosaavn.com/",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+}
 
 
 def _strip_noise(text: str) -> str:
@@ -243,17 +250,20 @@ def _build_search_queries(raw_title: str) -> List[str]:
         return []
     parts = [_strip_noise(p) for p in re.split(r"[|•]|//", raw_title) if _strip_noise(p)]
     candidates: List[str] = []
-    if len(parts) >= 2:
-        p0_words = parts[0].split()
-        p1_words = parts[1].split()
-        if len(p0_words) + len(p1_words) <= 8:
-            candidates.append(f"{parts[0]} {parts[1]}")
     if parts:
-        candidates.append(" ".join(parts[0].split()[:7]))
+        p0_clean = " ".join(parts[0].split()[:7])
+        candidates.append(p0_clean)
         if " - " in parts[0]:
-            right = parts[0].split(" - ", 1)[1].strip()
+            left, right = [s.strip() for s in parts[0].split(" - ", 1)]
+            if left:
+                candidates.append(left)
             if right:
                 candidates.append(right)
+        if len(parts) >= 2:
+            p0_words = parts[0].split()
+            p1_words = parts[1].split()
+            if len(p0_words) + len(p1_words) <= 8:
+                candidates.append(f"{parts[0]} {parts[1]}")
     else:
         cleaned = _strip_noise(raw_title)
         if cleaned:
@@ -307,7 +317,7 @@ async def _search_audius_best(queries: List[str], raw_title: str) -> Optional[Tu
     session = await get_http_session()
     best: Optional[Tuple[float, Dict]] = None
 
-    for q in queries[:2]:
+    for q in queries[:3]:
         try:
             async with session.get(
                 f"{_AUDIUS_API}/v1/tracks/search",
@@ -346,23 +356,27 @@ async def _search_audius_best(queries: List[str], raw_title: str) -> Optional[Tu
     return best
 
 
-async def _download_audius_track(vid: str, track: Dict) -> Optional[str]:
-    tid = track.get("id")
-    if not tid:
+async def _download_http_audio(
+    vid: str,
+    ext: str,
+    stream_url: str,
+    headers: Optional[Dict[str, str]] = None,
+) -> Optional[str]:
+    if not stream_url or not vid:
         return None
     os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-    out_path = f"{DOWNLOAD_DIR}/{vid}.mp3"
+    out_path = f"{DOWNLOAD_DIR}/{vid}.{ext}"
     part_path = f"{out_path}.part"
-    stream_url = f"{_AUDIUS_API}/v1/tracks/{tid}/stream?app_name=AnnieXMusic"
 
     try:
         session = await get_http_session()
         async with session.get(
             stream_url,
+            headers=headers,
             allow_redirects=True,
             timeout=aiohttp.ClientTimeout(total=90),
         ) as resp:
-            if resp.status != 200:
+            if resp.status not in (200, 206):
                 return None
             total = 0
             async with aiofiles.open(part_path, "wb") as f:
@@ -382,6 +396,178 @@ async def _download_audius_track(vid: str, track: Dict) -> Optional[str]:
             if os.path.exists(part_path):
                 os.remove(part_path)
         return None
+
+
+async def _download_audius_track(vid: str, track: Dict) -> Optional[str]:
+    tid = track.get("id")
+    if not tid:
+        return None
+    stream_url = f"{_AUDIUS_API}/v1/tracks/{tid}/stream?app_name=AnnieXMusic"
+    return await _download_http_audio(vid, "mp3", stream_url)
+
+
+async def _resolve_jiosaavn_official_url(
+    session: aiohttp.ClientSession, song_id: str
+) -> Optional[str]:
+    try:
+        async with session.get(
+            _JIOSAAVN_OFFICIAL_API,
+            params={
+                "__call": "song.getDetails",
+                "cc": "in",
+                "_marker": "0",
+                "_format": "json",
+                "pids": song_id,
+            },
+            headers=_JIOSAAVN_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            payload = await resp.json(content_type=None)
+    except Exception:
+        return None
+
+    song_obj = payload.get(song_id) if isinstance(payload, dict) else None
+    if not isinstance(song_obj, dict):
+        songs = payload.get("songs") if isinstance(payload, dict) else None
+        song_obj = songs[0] if isinstance(songs, list) and songs else None
+    if not isinstance(song_obj, dict):
+        return None
+
+    enc_url = song_obj.get("encrypted_media_url")
+    if not enc_url:
+        return None
+    bitrate = "320" if str(song_obj.get("320kbps", "")).lower() == "true" else "160"
+
+    try:
+        async with session.get(
+            _JIOSAAVN_OFFICIAL_API,
+            params={
+                "__call": "song.generateAuthToken",
+                "url": enc_url,
+                "bitrate": bitrate,
+                "api_version": "4",
+                "_format": "json",
+                "ctx": "web6dot0",
+                "_marker": "0",
+            },
+            headers=_JIOSAAVN_HEADERS,
+            timeout=aiohttp.ClientTimeout(total=8),
+        ) as resp:
+            if resp.status != 200:
+                return None
+            tok_data = await resp.json(content_type=None)
+    except Exception:
+        return None
+
+    auth_url = tok_data.get("auth_url") if isinstance(tok_data, dict) else None
+    return str(auth_url) if auth_url and str(auth_url).startswith("http") else None
+
+
+async def _search_jiosaavn_best(
+    queries: List[str], raw_title: str
+) -> Optional[Tuple[float, Dict]]:
+    session = await get_http_session()
+    best: Optional[Tuple[float, Dict]] = None
+
+    # 1. Fast direct search via saavn.sumit.co (includes CDN downloadUrl array)
+    for q in queries[:3]:
+        try:
+            async with session.get(
+                f"{_JIOSAAVN_SUMIT_API}/api/search/songs",
+                params={"query": q, "limit": "6"},
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                payload = await resp.json(content_type=None)
+        except Exception:
+            continue
+
+        songs = ((payload.get("data") or {}).get("results") if isinstance(payload, dict) else None)
+        if not isinstance(songs, list):
+            continue
+
+        for song in songs[:6]:
+            if not isinstance(song, dict):
+                continue
+            dl_urls = song.get("downloadUrl") or []
+            best_dl = dl_urls[-1].get("url") if isinstance(dl_urls, list) and dl_urls else None
+            if not best_dl:
+                continue
+            try:
+                dur = int(song.get("duration") or 0)
+            except (ValueError, TypeError):
+                dur = 0
+            title = html.unescape(str(song.get("name") or ""))
+            artists_obj = (song.get("artists") or {}).get("primary") or []
+            artist = ", ".join(
+                html.unescape(str(a.get("name") or ""))
+                for a in artists_obj[:3]
+                if isinstance(a, dict)
+            )
+            sc = _score_track_candidate(q, raw_title, title, dur, artist)
+            if best is None or sc > best[0]:
+                best = (sc, {"url": str(best_dl), "ext": "m4a", "headers": _JIOSAAVN_HEADERS, "source": "JioSaavn"})
+
+        if best and best[0] >= 2.0:
+            return best
+
+    if best is not None:
+        return best
+
+    # 2. Backup: official www.jiosaavn.com search -> generateAuthToken for top match
+    best_id: Optional[Tuple[float, str]] = None
+    for q in queries[:2]:
+        try:
+            async with session.get(
+                _JIOSAAVN_OFFICIAL_API,
+                params={
+                    "__call": "search.getResults",
+                    "_format": "json",
+                    "_marker": "0",
+                    "cc": "in",
+                    "q": q,
+                },
+                headers=_JIOSAAVN_HEADERS,
+                timeout=aiohttp.ClientTimeout(total=8),
+            ) as resp:
+                if resp.status != 200:
+                    continue
+                payload = await resp.json(content_type=None)
+        except Exception:
+            continue
+
+        songs = payload.get("results") if isinstance(payload, dict) else None
+        if not isinstance(songs, list):
+            continue
+        for song in songs[:6]:
+            if not isinstance(song, dict) or not song.get("id"):
+                continue
+            title = html.unescape(str(song.get("song") or song.get("title") or ""))
+            artist = html.unescape(str(song.get("primary_artists") or song.get("singers") or ""))
+            # search.getResults omits duration on light results; use 180s neutral fallback so scorer stays fair
+            sc = _score_track_candidate(q, raw_title, title, 180, artist)
+            if best_id is None or sc > best_id[0]:
+                best_id = (sc, str(song["id"]))
+        if best_id and best_id[0] >= 2.0:
+            break
+
+    if best_id and best_id[0] >= 0.0:
+        if auth_url := await _resolve_jiosaavn_official_url(session, best_id[1]):
+            return best_id[0], {"url": auth_url, "ext": "m4a", "headers": _JIOSAAVN_HEADERS, "source": "JioSaavn-Official"}
+
+    return None
+
+
+async def _download_jiosaavn_track(vid: str, track: Dict) -> Optional[str]:
+    return await _download_http_audio(
+        vid,
+        str(track.get("ext") or "m4a"),
+        str(track.get("url") or ""),
+        headers=track.get("headers"),
+    )
 
 
 def _is_sc_full_track(entry: Dict) -> bool:
@@ -514,10 +700,29 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
     if not queries or not vid:
         return None
 
-    audius_best = await _search_audius_best(queries, title)
-    if audius_best and audius_best[0] >= 2.0:
-        if path := await _download_audius_track(vid, audius_best[1]):
-            return path, "Audius"
+    # Search JioSaavn and Audius concurrently for lowest latency
+    jio_res, aud_res = await asyncio.gather(
+        _search_jiosaavn_best(queries, title),
+        _search_audius_best(queries, title),
+        return_exceptions=True,
+    )
+    jio_best = jio_res if isinstance(jio_res, tuple) else None
+    audius_best = aud_res if isinstance(aud_res, tuple) else None
+
+    # Rank strong candidates (prefer JioSaavn slightly when tied due to 320kbps AAC quality)
+    ranked: List[Tuple[float, float, str, Dict]] = []
+    if jio_best:
+        ranked.append((jio_best[0] + 0.35, jio_best[0], str(jio_best[1].get("source") or "JioSaavn"), jio_best[1]))
+    if audius_best:
+        ranked.append((audius_best[0], audius_best[0], "Audius", audius_best[1]))
+    ranked.sort(key=lambda item: item[0], reverse=True)
+
+    for _, raw_score, source_label, cand in ranked:
+        if raw_score < 1.8:
+            continue
+        downloader = _download_jiosaavn_track if source_label.startswith("JioSaavn") else _download_audius_track
+        if path := await downloader(vid, cand):
+            return path, source_label
 
     loop = asyncio.get_running_loop()
     sc_path = await run_with_semaphore(
@@ -526,9 +731,11 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
     if sc_path:
         return sc_path, "SoundCloud-Search"
 
-    if audius_best and audius_best[0] >= 0.0:
-        if path := await _download_audius_track(vid, audius_best[1]):
-            return path, "Audius"
+    for _, raw_score, source_label, cand in ranked:
+        if 0.0 <= raw_score < 1.8:
+            downloader = _download_jiosaavn_track if source_label.startswith("JioSaavn") else _download_audius_track
+            if path := await downloader(vid, cand):
+                return path, source_label
 
     dm_path = await run_with_semaphore(
         loop.run_in_executor(None, _dailymotion_fallback_sync, vid, queries, title, "audio")
@@ -542,11 +749,7 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
 def download_with_ytdlp_sync(link: str, fmt: str) -> Optional[str]:
     base_opts = get_ytdlp_base_opts()
     has_cookies = "cookiefile" in base_opts
-    client_profiles = (
-        [None, ["web", "tv"]]
-        if has_cookies
-        else [None, ["android_vr", "tv_simply"]]
-    )
+    client_profiles = [None, ["web", "tv"]] if has_cookies else [None, ["android_vr"]]
 
     last_err: Optional[Exception] = None
     for players in client_profiles:
@@ -562,6 +765,9 @@ def download_with_ytdlp_sync(link: str, fmt: str) -> Optional[str]:
                     return path
         except Exception as e:
             last_err = e
+            err_low = str(e).lower()
+            if not has_cookies and ("sign in" in err_low or "not a bot" in err_low or "cookies" in err_low):
+                break
 
     LOGGER.warning(
         f"yt-dlp download error for {link}: {last_err or 'no downloadable format found'}"

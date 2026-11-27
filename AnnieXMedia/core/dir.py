@@ -1,5 +1,6 @@
 # Authored By Certified Coders © 2025
 import os
+import time
 from ..logging import LOGGER
 
 BASE_DIR = os.getcwd()
@@ -7,6 +8,57 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 COUPLE_DIR = os.path.join(BASE_DIR, "couples")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 BACKUP_DIR = os.path.join(BASE_DIR, "AnnieXMediaBackup")
+
+
+def prune_storage_cache(
+    max_age_seconds: int = 10800,
+    max_total_bytes: int = 450 * 1024 * 1024,
+) -> int:
+    """Remove old downloaded/cached media files and cap disk footprint on PaaS hosts."""
+    now = time.time()
+    removed = 0
+    files = []
+
+    for folder in (DOWNLOAD_DIR, CACHE_DIR):
+        if not os.path.isdir(folder):
+            continue
+        try:
+            for entry in os.scandir(folder):
+                if not entry.is_file() or entry.name.endswith(".part"):
+                    continue
+                try:
+                    st = entry.stat()
+                except OSError:
+                    continue
+                if now - st.st_mtime > max_age_seconds:
+                    try:
+                        os.remove(entry.path)
+                        removed += 1
+                    except OSError:
+                        pass
+                else:
+                    files.append((st.st_mtime, st.st_size, entry.path))
+        except OSError:
+            continue
+
+    total_size = sum(item[1] for item in files)
+    if total_size > max_total_bytes:
+        # Never prune very recent files (< 5 min) even during busy bursts
+        recent_cutoff = now - 300
+        for mtime, size, path in sorted(files, key=lambda x: x[0]):
+            if total_size <= max_total_bytes:
+                break
+            if mtime > recent_cutoff:
+                continue
+            try:
+                os.remove(path)
+                total_size -= size
+                removed += 1
+            except OSError:
+                pass
+
+    return removed
+
 
 def StorageManager():
 
