@@ -200,7 +200,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     elif "vid_" in queued:
         mystic = await callback.message.reply_text(_["call_7"], link_preview_options=LinkPreviewOptions(is_disabled=True))
         try:
-            file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=status)
+            file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=status, title=title)
         except Exception:
             return await mystic.edit_text(_["call_6"])
         try:

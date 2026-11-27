@@ -7,6 +7,7 @@ import re
 import time
 from typing import Dict, List, Optional, Tuple, Union
 
+import aiohttp
 import yt_dlp
 from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
@@ -14,7 +15,7 @@ from youtubesearchpython.aio import VideosSearch, Playlist
 
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
 from AnnieXMedia.utils.database import is_on_off
-from AnnieXMedia.utils.downloader import yt_dlp_download
+from AnnieXMedia.utils.downloader import extract_video_id, get_http_session, yt_dlp_download
 from AnnieXMedia.utils.errors import capture_internal_err
 from AnnieXMedia.utils.formatters import time_to_seconds
 from AnnieXMedia.utils.tuning import YTDLP_TIMEOUT, YOUTUBE_META_MAX, YOUTUBE_META_TTL
@@ -193,6 +194,22 @@ class YouTubeAPI:
             or info.get("thumbnails", [{}])[-1].get("url", "")
         ).split("?")[0] if info else ""
 
+    async def _fetch_oembed_info(self, url: str) -> Optional[Dict]:
+        try:
+            session = await get_http_session()
+            async with session.get(
+                "https://www.youtube.com/oembed",
+                params={"url": url, "format": "json"},
+                timeout=aiohttp.ClientTimeout(total=6),
+            ) as resp:
+                if resp.status == 200:
+                    data = await resp.json(content_type=None)
+                    if isinstance(data, dict) and data.get("title"):
+                        return data
+        except Exception:
+            pass
+        return None
+
     @capture_internal_err
     async def track(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[Dict, str]:
         prepared_link = self._prepare_link(link, videoid)
@@ -205,29 +222,44 @@ class YouTubeAPI:
                     f"for query/URL: '{prepared_link}'"
                 )
         except Exception as search_err:
-            stdout, stderr = await _exec_proc(
-                "yt-dlp", *(_cookies_args()), "--dump-json", "--no-warnings", prepared_link
-            )
-
-            def _both_failed(details: str) -> ValueError:
-                return ValueError(
-                    f"Both methods failed for '{prepared_link}':\n"
-                    f"  1. youtubesearchpython error: {search_err}\n"
-                    f"{details}"
+            oembed = await self._fetch_oembed_info(prepared_link) if prepared_link.startswith("http") else None
+            if oembed:
+                search_res = await cached_youtube_search(oembed["title"])
+                if search_res:
+                    info = search_res[0]
+                else:
+                    vid = extract_video_id(prepared_link)
+                    info = {
+                        "id": vid,
+                        "title": oembed["title"],
+                        "webpage_url": prepared_link,
+                        "duration": None,
+                        "thumbnail": oembed.get("thumbnail_url", ""),
+                    }
+            else:
+                stdout, stderr = await _exec_proc(
+                    "yt-dlp", *(_cookies_args()), "--dump-json", "--no-warnings", prepared_link
                 )
 
-            if not stdout:
-                stderr_msg = stderr.decode().strip() if stderr else "Empty response"
-                raise _both_failed(f"  2. yt-dlp error: {stderr_msg}")
+                def _both_failed(details: str) -> ValueError:
+                    return ValueError(
+                        f"Both methods failed for '{prepared_link}':\n"
+                        f"  1. youtubesearchpython error: {search_err}\n"
+                        f"{details}"
+                    )
 
-            try:
-                info = json.loads(stdout.decode())
-            except json.JSONDecodeError as json_err:
-                raw = stdout.decode()[:400]
-                raise _both_failed(
-                    f"  2. yt-dlp JSON error: {json_err}\n"
-                    f"     Raw: {raw}..."
-                ) from json_err
+                if not stdout:
+                    stderr_msg = stderr.decode().strip() if stderr else "Empty response"
+                    raise _both_failed(f"  2. yt-dlp error: {stderr_msg}")
+
+                try:
+                    info = json.loads(stdout.decode())
+                except json.JSONDecodeError as json_err:
+                    raw = stdout.decode()[:400]
+                    raise _both_failed(
+                        f"  2. yt-dlp JSON error: {json_err}\n"
+                        f"     Raw: {raw}..."
+                    ) from json_err
 
         thumb = (
             info.get("thumbnail")
@@ -367,6 +399,15 @@ class YouTubeAPI:
             r.get("id", ""),
         )
 
+    async def _resolve_title(self, link: str, provided_title: Optional[str] = None) -> str:
+        if provided_title and str(provided_title).strip():
+            return str(provided_title).strip()
+        if t := await self.title(link):
+            return t
+        if oembed := await self._fetch_oembed_info(link):
+            return str(oembed.get("title") or "").strip()
+        return ""
+
     @capture_internal_err
     async def download(
         self,
@@ -375,8 +416,10 @@ class YouTubeAPI:
         *,
         video: Union[bool, str, None] = None,
         videoid: Union[str, bool, None] = None,
+        title: Optional[str] = None,
     ) -> Union[Tuple[str, Optional[bool]], Tuple[None, None]]:
         link = self._prepare_link(link, videoid)
+        resolved_title = await self._resolve_title(link, title)
 
         if video:
             if await self.is_live(link):
@@ -386,7 +429,7 @@ class YouTubeAPI:
                 return None, None
 
             if await is_on_off(1):
-                p = await yt_dlp_download(link, type="video", title=await self.title(link))
+                p = await yt_dlp_download(link, type="video", title=resolved_title)
                 return (p, True) if p else (None, None)
 
             stdout, _ = await _exec_proc(
@@ -399,7 +442,8 @@ class YouTubeAPI:
             )
             if stdout:
                 return stdout.decode().split("\n")[0], None
-            return None, None
+            p = await yt_dlp_download(link, type="video", title=resolved_title)
+            return (p, True) if p else (None, None)
 
-        p = await yt_dlp_download(link, type="audio", title=await self.title(link))
+        p = await yt_dlp_download(link, type="audio", title=resolved_title)
         return (p, True) if p else (None, None)
