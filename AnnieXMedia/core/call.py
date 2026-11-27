@@ -7,7 +7,7 @@ from typing import Union
 from ntgcalls import TelegramServerError, ConnectionNotFound
 from pyrogram import Client
 from pyrogram.errors import FloodWait, ChatAdminRequired
-from pyrogram.types import InlineKeyboardMarkup
+from pyrogram.types import InlineKeyboardMarkup, LinkPreviewOptions
 from pytgcalls import PyTgCalls
 from pytgcalls.exceptions import NoActiveGroupCall, NoAudioSourceFound, NoVideoSourceFound
 from pytgcalls.types import AudioQuality, ChatUpdate, MediaStream, StreamEnded, Update, VideoQuality
@@ -413,11 +413,11 @@ class Call:
                     )
                 except Exception:
                     return await mystic.edit_text(
-                        _["call_6"], disable_web_page_preview=True
+                        _["call_6"], link_preview_options=LinkPreviewOptions(is_disabled=True)
                     )
                 if not file_path:
                     return await mystic.edit_text(
-                        _["call_6"], disable_web_page_preview=True
+                        _["call_6"], link_preview_options=LinkPreviewOptions(is_disabled=True)
                     )
 
                 stream = dynamic_media_stream(path=file_path, video=video)

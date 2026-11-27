@@ -10,6 +10,7 @@ import urllib3
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError
 from pyrogram import filters
+from pyrogram.types import LinkPreviewOptions
 
 import config
 from AnnieXMedia import app
@@ -118,7 +119,7 @@ async def update_(client, message, _):
             f"<u><b>ᴜᴩᴅᴀᴛᴇs :</b></u>\n\n<a href={url}>ᴄʜᴇᴄᴋ ᴜᴩᴅᴀᴛᴇs</a>"
         )
     else:
-        nrs = await response.edit(_final_updates_, disable_web_page_preview=True)
+        nrs = await response.edit(_final_updates_, link_preview_options=LinkPreviewOptions(is_disabled=True))
 
     pull_proc = await asyncio.create_subprocess_exec(
         "git", "pull",

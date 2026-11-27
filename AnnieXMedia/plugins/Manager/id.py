@@ -1,7 +1,7 @@
 # Authored By Certified Coders © 2025
 from pyrogram import filters
 from pyrogram.enums import ParseMode
-from pyrogram.types import Message
+from pyrogram.types import LinkPreviewOptions, Message
 
 from AnnieXMedia import app
 
@@ -27,7 +27,7 @@ async def get_id(client, message: Message):
             tgt_user = await client.get_users(target)
             out.append(f"**[ᴜsᴇʀ ɪᴅ:](tg://user?id={tgt_user.id})** `{tgt_user.id}`")
         except Exception:
-            return await message.reply_text("**ᴛʜɪs ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ᴇxɪsᴛ.**", quote=True)
+            return await message.reply_text("**ᴛʜɪs ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ᴇxɪsᴛ.**")
 
     if chat.username and str(chat.type).lower() != "chattype.private" and "private" not in str(chat.type).lower():
         out.append(f"**[ᴄʜᴀᴛ ɪᴅ:](https://t.me/{chat.username})** `{chat.id}`")
@@ -57,6 +57,6 @@ async def get_id(client, message: Message):
 
     await message.reply_text(
         "\n".join(out),
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
         parse_mode=ParseMode.MARKDOWN,
     )

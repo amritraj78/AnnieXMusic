@@ -4,7 +4,7 @@ import os
 import time
 from typing import Optional, Union
 
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Voice
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Voice
 
 import config
 from AnnieXMedia import app
@@ -25,7 +25,7 @@ class TeleAPI:
         n = self.chars_limit
         out = [string[i : i + n] for i in range(0, len(string), n)]
         for j, x in enumerate(out[:3], 1):
-            await message.reply_text(x, disable_web_page_preview=True)
+            await message.reply_text(x, link_preview_options=LinkPreviewOptions(is_disabled=True))
         return True
 
     async def get_link(self, message):

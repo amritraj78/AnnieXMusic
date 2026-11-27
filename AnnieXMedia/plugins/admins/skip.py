@@ -1,6 +1,6 @@
 # Authored By Certified Coders © 2025
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardMarkup, LinkPreviewOptions, Message
 
 import config
 from AnnieXMedia import YouTube, app
@@ -136,7 +136,7 @@ async def skip(cli, message: Message, _, chat_id):
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "tg"
     elif "vid_" in queued:
-        mystic = await message.reply_text(_["call_7"], disable_web_page_preview=True)
+        mystic = await message.reply_text(_["call_7"], link_preview_options=LinkPreviewOptions(is_disabled=True))
         try:
             file_path, direct = await YouTube.download(
                 videoid,

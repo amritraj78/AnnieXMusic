@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+from pyrogram.types import LinkPreviewOptions
 from AnnieXMedia import app
 from config import SUPPORT_CHAT
 from AnnieXMedia.misc import SUDOERS
@@ -12,7 +13,7 @@ def language(mystic):
             if not message.from_user or message.from_user.id not in SUDOERS:
                 return await message.reply_text(
                     text=f"{app.mention} ɪs ᴜɴᴅᴇʀ ᴍᴀɪɴᴛᴇɴᴀɴᴄᴇ, ᴠɪsɪᴛ <a href={SUPPORT_CHAT}>sᴜᴘᴘᴏʀᴛ ᴄʜᴀᴛ</a> ғᴏʀ ᴋɴᴏᴡɪɴɢ ᴛʜᴇ ʀᴇᴀsᴏɴ.",
-                    disable_web_page_preview=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
         try:
             await message.delete()

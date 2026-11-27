@@ -4,7 +4,7 @@ import random
 import time
 from pyrogram import filters
 from pyrogram.enums import ChatType
-from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
 from youtubesearchpython.aio import VideosSearch
 
 import config
@@ -62,7 +62,7 @@ async def start_pm(client, message: Message, _):
                 return await message.reply_text(
                     text=_["help_1"].format(config.SUPPORT_CHAT),
                     reply_markup=keyboard,
-                    disable_web_page_preview=True,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
                 )
 
         if name.startswith("sud"):
@@ -126,7 +126,7 @@ async def start_pm(client, message: Message, _):
                         chat_id=message.chat.id,
                         text=searched_text,
                         reply_markup=key,
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
 
                 if await is_on_off(2) and message.from_user:
@@ -246,7 +246,7 @@ async def welcome(client, message: Message):
                             f"https://t.me/{app.username}?start=sudolist",
                             config.SUPPORT_CHAT,
                         ),
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
                     return await app.leave_chat(message.chat.id)
 

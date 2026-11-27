@@ -1,4 +1,6 @@
 # Authored By Certified Coders © 2025
+import asyncio
+import contextlib
 from io import BytesIO
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -258,7 +260,11 @@ async def msg_quotly_cmd(self: Client, ctx: Message):
                 continue  # Ignore invalid arguments
 
     if count < 1 or count > 10:
-        return await ctx.reply_text("Invalid range", delete_after=6)
+        err_msg = await ctx.reply_text("Invalid range")
+        await asyncio.sleep(6)
+        with contextlib.suppress(Exception):
+            await err_msg.delete()
+        return
     
     # Send processing message
     processing_msg = await ctx.reply_text("❄️")

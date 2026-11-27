@@ -12,7 +12,7 @@ async def style_buttons(c, m, cb=False):
         text = message.text.replace("`", "")
     else:
         if len(m.command) < 2:
-            return await m.reply("❌ Please provide text to style.\n\nExample: `/font Hello World!`", quote=True)
+            return await m.reply("❌ Please provide text to style.\n\nExample: `/font Hello World!`")
         message = m
         text = m.text.split(" ", 1)[1]
 
@@ -58,7 +58,7 @@ async def style_buttons(c, m, cb=False):
     if cb:
         await m.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
     else:
-        await m.reply_text(f"`{text}`", reply_markup=InlineKeyboardMarkup(buttons), quote=True)
+        await m.reply_text(f"`{text}`", reply_markup=InlineKeyboardMarkup(buttons))
 
 
 

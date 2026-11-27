@@ -85,5 +85,4 @@ async def cute(_, message):
             caption,
             parse_mode=enums.ParseMode.MARKDOWN,
             reply_markup=SUPPORT_BTN,
-            quote=True,
         )

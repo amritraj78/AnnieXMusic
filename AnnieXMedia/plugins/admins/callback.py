@@ -2,7 +2,7 @@
 import asyncio
 import random
 from pyrogram import filters
-from pyrogram.types import CallbackQuery, InlineKeyboardMarkup
+from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions
 from config import (
     BANNED_USERS,
     lyrical,
@@ -198,7 +198,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
 
     elif "vid_" in queued:
-        mystic = await callback.message.reply_text(_["call_7"], disable_web_page_preview=True)
+        mystic = await callback.message.reply_text(_["call_7"], link_preview_options=LinkPreviewOptions(is_disabled=True))
         try:
             file_path, direct = await YouTube.download(videoid, mystic, videoid=True, video=status)
         except Exception:

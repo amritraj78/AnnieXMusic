@@ -102,10 +102,10 @@ async def executor(client: Client, message: Message):
             with open(filename, "w+", encoding="utf8") as out_file:
                 out_file.write(str(evaluation))
 
-            await message.reply_document(
+            await client.send_document(
+                chat_id=message.chat.id,
                 document=filename,
                 caption=f"<b>⥤ ᴇᴠᴀʟ :</b>\n<code>{html.escape(cmd[:980])}</code>\n\n<b>⥤ ʀᴇsᴜʟᴛ :</b>\nAttached Document",
-                quote=False,
                 reply_markup=keyboard,
             )
             try:

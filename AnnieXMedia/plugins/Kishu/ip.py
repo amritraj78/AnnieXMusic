@@ -1,6 +1,6 @@
 # Authored By Certified Coders © 2025
 from pyrogram import filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from AnnieXMedia import app
 
 import asyncio
@@ -139,7 +139,7 @@ async def ip_info_and_score(_, message):
         await message.reply_text(
             "Please provide an IP address.\n"
             "Example: <code>/ip 8.8.8.8</code>",
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
         return
 
@@ -152,14 +152,14 @@ async def ip_info_and_score(_, message):
             await message.reply_text(
                 "That looks like a <b>non-routable</b> or <b>private</b> address. "
                 "Please provide a public IP.",
-                disable_web_page_preview=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
             return
     except ValueError:
         await message.reply_text(
             "Invalid IP format. Please provide a valid IPv4 or IPv6 address.\n"
             "Example: <code>/ip 1.1.1.1</code>",
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
         return
 
@@ -180,5 +180,5 @@ async def ip_info_and_score(_, message):
     await wait_msg.edit_text(
         text,
         reply_markup=keyboard,
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )

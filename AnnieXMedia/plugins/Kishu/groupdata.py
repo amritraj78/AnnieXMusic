@@ -4,7 +4,7 @@ from datetime import datetime
 from asyncio import sleep
 
 from pyrogram import filters, enums
-from pyrogram.types import Message
+from pyrogram.types import LinkPreviewOptions, Message
 
 from AnnieXMedia import app
 
@@ -112,5 +112,5 @@ async def groupdata_handler(client, message: Message):
     await status.edit(
         text=text,
         parse_mode=enums.ParseMode.HTML,
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )

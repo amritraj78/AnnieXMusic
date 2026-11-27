@@ -3,7 +3,7 @@ import aiohttp
 import html
 from datetime import datetime
 from pyrogram import filters
-from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup
+from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 from pyrogram.enums import ParseMode
 
 from AnnieXMedia import app
@@ -31,7 +31,7 @@ async def github(_, message: Message):
         return await message.reply_text(
             "<b>ᴜsᴀɢᴇ:</b> <code>/git &lt;username&gt;</code>",
             parse_mode=ParseMode.HTML,
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
 
     username = message.command[1].strip()
@@ -44,26 +44,26 @@ async def github(_, message: Message):
                     return await message.reply_text(
                         "🚫 <b>ᴜsᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ!</b>",
                         parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
                 if r.status == 403:
                     return await message.reply_text(
                         "⚠️ <b>ʀᴀᴛᴇ ʟɪᴍɪᴛ ʜɪᴛ. ᴛʀʏ ᴀɢᴀɪɴ sᴏᴏɴ.</b>",
                         parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
                 if r.status != 200:
                     return await message.reply_text(
                         f"⚠️ <b>ᴇʀʀᴏʀ ғᴇᴛᴄʜɪɴɢ ᴅᴀᴛᴀ (HTTP {r.status}).</b>",
                         parse_mode=ParseMode.HTML,
-                        disable_web_page_preview=True,
+                        link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
                 data = await r.json()
         except Exception as e:
             return await message.reply_text(
                 f"⚠️ <b>ʀᴇQᴜᴇsᴛ ꜰᴀɪʟᴇᴅ:</b> <code>{html.escape(str(e))}</code>",
                 parse_mode=ParseMode.HTML,
-                disable_web_page_preview=True,
+                link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
 
     name = _safe(data.get("name") or "Not specified")
@@ -121,5 +121,5 @@ async def github(_, message: Message):
         caption,
         reply_markup=keyboard,
         parse_mode=ParseMode.HTML,
-        disable_web_page_preview=True,
+        link_preview_options=LinkPreviewOptions(is_disabled=True),
     )

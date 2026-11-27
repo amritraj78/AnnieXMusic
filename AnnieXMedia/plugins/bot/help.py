@@ -3,7 +3,7 @@ import re
 from typing import Union
 
 from pyrogram import Client, filters, types
-from pyrogram.types import InlineKeyboardMarkup, Message
+from pyrogram.types import InlineKeyboardMarkup, LinkPreviewOptions, Message
 
 from AnnieXMedia import app
 from AnnieXMedia.utils.database import get_lang
@@ -80,7 +80,7 @@ async def help_com_group(client: Client, message: Message, _):
     await message.reply_text(
         _["help_2"],
         reply_markup=InlineKeyboardMarkup(keyboard),
-        disable_web_page_preview=True
+        link_preview_options=LinkPreviewOptions(is_disabled=True)
     )
 
 # ────────────────────────────────────────────────  main help buttons ──

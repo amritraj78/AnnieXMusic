@@ -17,7 +17,7 @@ async def extract_media(_, message: Message):
     if not (replied and replied.video):
         return await message.reply_text("❌ Please reply to a *video* message.")
     if len(message.command) < 2:
-        return await message.reply_text("ℹ️ Use `/extract audio` or `/extract video`.", quote=True)
+        return await message.reply_text("ℹ️ Use `/extract audio` or `/extract video`.")
 
     if replied.video.file_size and replied.video.file_size > MAX_SIZE_BYTES:
         return await message.reply_text(
@@ -27,7 +27,7 @@ async def extract_media(_, message: Message):
 
     command = message.command[1].lower()
     if command not in ("audio", "video"):
-        return await message.reply_text("❌ Invalid command. Use `/extract audio` or `/extract video`.", quote=True)
+        return await message.reply_text("❌ Invalid command. Use `/extract audio` or `/extract video`.")
 
     processing_msg = await message.reply_text("🔧 Processing video…")
 

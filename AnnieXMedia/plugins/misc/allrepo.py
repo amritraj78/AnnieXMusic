@@ -1,6 +1,6 @@
 # Authored By Certified Coders © 2025
 from pyrogram import Client, filters
-from pyrogram.types import Message
+from pyrogram.types import LinkPreviewOptions, Message
 import httpx
 from AnnieXMedia import app
 
@@ -25,7 +25,7 @@ async def all_repo_command(client: Client, message: Message):
         chunks = chunk_string(repo_info, 4000)
 
         for chunk in chunks:
-            await message.reply_text(chunk, disable_web_page_preview=True)
+            await message.reply_text(chunk, link_preview_options=LinkPreviewOptions(is_disabled=True))
 
     except Exception as e:
         print(f"Error in /allrepo: {e}")

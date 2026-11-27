@@ -1,7 +1,7 @@
 # Authored By Certified Coders © 2025
 import html
 from pyrogram import filters, Client
-from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
+from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from unidecode import unidecode
 
 from AnnieXMedia import app
@@ -35,7 +35,7 @@ async def activevc(_, message: Message):
     else:
         await mystic.edit_text(
             f"<b>» ʟɪsᴛ ᴏғ ᴄᴜʀʀᴇɴᴛʟʏ ᴀᴄᴛɪᴠᴇ ᴠᴏɪᴄᴇ ᴄʜᴀᴛs :</b>\n\n{text}",
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
 
 @app.on_message(filters.command(["activev", "activevideo", "avc"]) & SUDOERS)
@@ -60,7 +60,7 @@ async def activevi_(_, message: Message):
     else:
         await mystic.edit_text(
             f"<b>» ʟɪsᴛ ᴏғ ᴄᴜʀʀᴇɴᴛʟʏ ᴀᴄᴛɪᴠᴇ ᴠɪᴅᴇᴏ ᴄʜᴀᴛs :</b>\n\n{text}",
-            disable_web_page_preview=True,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
 
 @app.on_message(filters.command(["ac", "av"]) & SUDOERS)
