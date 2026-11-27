@@ -14,7 +14,7 @@ IGNORED_ERROR_KEYWORDS = [
 ]
 
 IGNORED_EXCEPTION_CLASSES = (
-    
+    AssistantErr,
 )
 
 def is_ignored_error(err: Union[Exception, BaseException]) -> bool:

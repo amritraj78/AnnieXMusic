@@ -12,7 +12,7 @@ from aiohttp import TCPConnector
 from yt_dlp import YoutubeDL
 
 from AnnieXMedia.core.dir import CACHE_DIR, DOWNLOAD_DIR
-from AnnieXMedia.utils.cookie_handler import COOKIE_PATH as _COOKIES_FILE
+from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
 from AnnieXMedia.utils.tuning import CHUNK_SIZE, SEM
 from config import API_KEY, API_URL, VIDEO_API_URL
 from AnnieXMedia.logging import LOGGER
@@ -47,12 +47,7 @@ def extract_video_id(link: str) -> str:
 
 
 def get_cookie_file() -> Optional[str]:
-    try:
-        if _COOKIES_FILE and os.path.exists(_COOKIES_FILE) and os.path.getsize(_COOKIES_FILE) > 0:
-            return _COOKIES_FILE
-    except Exception:
-        pass
-    return None
+    return get_valid_cookie_file()
 
 
 def find_cached_file(video_id: str) -> Optional[str]:
@@ -80,8 +75,8 @@ def get_ytdlp_base_opts() -> Dict[str, object]:
         "retries": 1,
         "fragment_retries": 1,
         "cachedir": str(CACHE_DIR),
-        "ignoreerrors": True,
-        "merge_output_format": "mp4"
+        "ignoreerrors": False,
+        "merge_output_format": "mp4",
     }
     if cookiefile := get_cookie_file():
         opts["cookiefile"] = cookiefile
@@ -195,7 +190,9 @@ async def api_download_video(link: str) -> Optional[str]:
         return None
 
 
-def get_final_path_from_info(info: Dict) -> Optional[str]:
+def get_final_path_from_info(info: Optional[Dict]) -> Optional[str]:
+    if not isinstance(info, dict):
+        return None
     vid = info.get("id")
     if not vid:
         return None
@@ -213,15 +210,33 @@ def get_final_path_from_info(info: Dict) -> Optional[str]:
 
 
 def download_with_ytdlp_sync(link: str, fmt: str) -> Optional[str]:
-    try:
-        opts = get_ytdlp_base_opts()
+    base_opts = get_ytdlp_base_opts()
+    has_cookies = "cookiefile" in base_opts
+    client_profiles = (
+        [None, ["web", "tv"]]
+        if has_cookies
+        else [None, ["android_vr", "tv_simply"], ["tv", "web_safari"]]
+    )
+
+    last_err: Optional[Exception] = None
+    for players in client_profiles:
+        opts = dict(base_opts)
         opts["format"] = fmt
-        with YoutubeDL(opts) as ydl:
-            info = ydl.extract_info(link, download=True)
-            return get_final_path_from_info(info)
-    except Exception as e:
-        LOGGER.warning(f"yt-dlp download error for {link}: {e}")
-        return None
+        if players:
+            opts["extractor_args"] = {"youtube": {"player_client": players}}
+        try:
+            with YoutubeDL(opts) as ydl:
+                info = ydl.extract_info(link, download=True)
+                path = get_final_path_from_info(info)
+                if path:
+                    return path
+        except Exception as e:
+            last_err = e
+
+    LOGGER.warning(
+        f"yt-dlp download error for {link}: {last_err or 'no downloadable format found'}"
+    )
+    return None
 
 
 async def run_with_semaphore(coro):

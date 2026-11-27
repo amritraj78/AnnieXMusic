@@ -1,13 +1,37 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import os
 import httpx
 from pathlib import Path
+from typing import Optional
 from urllib.parse import urlsplit
 
 from config import COOKIE_URL
 from AnnieXMedia.utils.errors import capture_internal_err
 
 COOKIE_PATH = Path("AnnieXMedia/assets/cookies.txt")
+_NETSCAPE_HEADERS = ("# Netscape", "# HTTP Cookie File")
+
+
+def is_valid_cookie_file(path: Path = COOKIE_PATH) -> bool:
+    """Return True only if path exists, exceeds minimum size, and looks like Netscape cookies."""
+    try:
+        if not path or not path.is_file() or path.stat().st_size <= 50:
+            return False
+        content = path.read_text(encoding="utf-8", errors="ignore").lstrip()
+        if not content.startswith(_NETSCAPE_HEADERS):
+            return False
+        return any(
+            line.strip() and not line.lstrip().startswith("#")
+            for line in content.splitlines()
+        )
+    except OSError:
+        return False
+
+
+def get_valid_cookie_file() -> Optional[str]:
+    """Return string cookie path when valid, else None so yt-dlp never loads empty/corrupt cookies."""
+    return str(COOKIE_PATH) if is_valid_cookie_file(COOKIE_PATH) else None
 
 
 def _extract_paste_id(url: str) -> str:
@@ -36,7 +60,7 @@ def resolve_raw_cookie_url(url: str) -> str:
 @capture_internal_err
 async def fetch_and_store_cookies():
     if not COOKIE_URL:
-        if COOKIE_PATH.exists() and COOKIE_PATH.stat().st_size > 50:
+        if is_valid_cookie_file(COOKIE_PATH):
             return
         raise EnvironmentError("⚠️ ᴄᴏᴏᴋɪᴇ_ᴜʀʟ ɴᴏᴛ sᴇᴛ ɪɴ ᴇɴᴠ.")
 
@@ -66,7 +90,7 @@ async def fetch_and_store_cookies():
     except Exception:
         pass
 
-    if not cookies.startswith("# Netscape"):
+    if not cookies.lstrip().startswith(_NETSCAPE_HEADERS):
         raise ValueError("⚠️ ɪɴᴠᴀʟɪᴅ ᴄᴏᴏᴋɪᴇ ꜰᴏʀᴍᴀᴛ. ɴᴇᴇᴅs ɴᴇᴛsᴄᴀᴘᴇ ꜰᴏʀᴍᴀᴛ.")
 
     if len(cookies) < 100:
