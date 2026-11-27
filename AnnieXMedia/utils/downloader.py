@@ -14,7 +14,7 @@ from yt_dlp import YoutubeDL
 
 from AnnieXMedia.core.dir import CACHE_DIR, DOWNLOAD_DIR
 from AnnieXMedia.core.http_pool import close_http_session, get_http_session
-from AnnieXMedia.core.security import is_safe_http_url, sanitize_ext
+from AnnieXMedia.core.security import is_safe_http_url, sanitize_ext, sanitize_id_token
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
 from AnnieXMedia.utils.tuning import CHUNK_SIZE, SEM
 from config import API_KEY, API_URL, VIDEO_API_URL
@@ -361,10 +361,12 @@ async def _download_http_audio(
     stream_url: str,
     headers: Optional[Dict[str, str]] = None,
 ) -> Optional[str]:
-    if not stream_url or not vid:
+    safe_vid = sanitize_id_token(vid)
+    safe_ext = sanitize_ext(f"x.{ext}", allowed=("mp3", "m4a", "webm", "ogg", "opus", "mp4"), default="mp3")
+    if not stream_url or not safe_vid or not await is_safe_http_url(stream_url):
         return None
-    os.makedirs(DOWNLOAD_DIR, exist_ok=True)
-    out_path = f"{DOWNLOAD_DIR}/{vid}.{ext}"
+    await asyncio.to_thread(os.makedirs, DOWNLOAD_DIR, exist_ok=True)
+    out_path = f"{DOWNLOAD_DIR}/{safe_vid}.{safe_ext}"
     part_path = f"{out_path}.part"
 
     try:
@@ -383,17 +385,16 @@ async def _download_http_audio(
                     if not chunk:
                         break
                     total += len(chunk)
+                    if total > 256 * 1024 * 1024:
+                        raise ValueError("Remote audio exceeded 256MB safety limit")
                     await f.write(chunk)
         if total < 16384:
-            with contextlib.suppress(OSError):
-                os.remove(part_path)
+            await asyncio.to_thread(lambda: os.remove(part_path) if os.path.exists(part_path) else None)
             return None
-        os.replace(part_path, out_path)
+        await asyncio.to_thread(os.replace, part_path, out_path)
         return out_path if os.path.exists(out_path) else None
     except Exception:
-        with contextlib.suppress(OSError):
-            if os.path.exists(part_path):
-                os.remove(part_path)
+        await asyncio.to_thread(lambda: os.remove(part_path) if os.path.exists(part_path) else None)
         return None
 
 

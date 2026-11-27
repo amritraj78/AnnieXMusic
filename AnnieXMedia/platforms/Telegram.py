@@ -63,7 +63,7 @@ class TeleAPI:
         video: Union[bool, str] = None,
     ) -> str:
         base = os.path.realpath("downloads")
-        os.makedirs(base, exist_ok=True)
+        await asyncio.to_thread(os.makedirs, base, exist_ok=True)
         if audio:
             uid = sanitize_id_token(getattr(audio, "file_unique_id", None), f"aud_{int(time.time())}")
             ext = "ogg" if isinstance(audio, Voice) else sanitize_ext(
@@ -158,12 +158,17 @@ class TeleAPI:
                     progress=progress,
                 )
                 if not saved or not os.path.isfile(saved) or os.path.getsize(saved) < 512:
+                    if saved and os.path.exists(saved):
+                        try:
+                            await asyncio.to_thread(os.remove, saved)
+                        except OSError:
+                            pass
                     try:
                         await mystic.edit_text(_["tg_3"])
                     except Exception:
                         pass
                     return
-                os.replace(saved, fname)
+                await asyncio.to_thread(os.replace, saved, fname)
                 dl_succeeded = True
                 try:
                     elapsed = get_readable_time(int(time.time() - speed_counter[message.id]))
@@ -180,6 +185,8 @@ class TeleAPI:
                     pass
 
         task = asyncio.create_task(down_load())
+        if len(config.lyrical) > 1000:
+            config.lyrical.clear()
         config.lyrical[mystic.id] = task
         try:
             await task
@@ -188,8 +195,10 @@ class TeleAPI:
         finally:
             config.lyrical.pop(mystic.id, None)
             if not dl_succeeded and os.path.exists(part_path):
-                try:
-                    os.remove(part_path)
-                except OSError:
-                    pass
+                def _rm_part():
+                    try:
+                        os.remove(part_path)
+                    except OSError:
+                        pass
+                await asyncio.to_thread(_rm_part)
         return dl_succeeded
