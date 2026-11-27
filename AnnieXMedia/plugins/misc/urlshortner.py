@@ -54,12 +54,21 @@ async def is_safe_url(url: str) -> bool:
     return await asyncio.to_thread(_is_safe_url_sync, url)
 
 
-def _shorten_sync(link: str):
-    return (
-        shortener.tinyurl.short(link),
-        shortener.dagd.short(link),
-        shortener.clckru.short(link),
+def _shorten_sync(link: str) -> list[tuple[str, str]]:
+    providers = (
+        ("TinyURL", "tinyurl"),
+        ("Clck.ru", "clckru"),
+        ("Dagd", "dagd"),
     )
+    results: list[tuple[str, str]] = []
+    for label, attr in providers:
+        try:
+            short_url = str(getattr(shortener, attr).short(link) or "").strip()
+            if short_url.startswith(("http://", "https://")):
+                results.append((label, short_url))
+        except Exception:
+            continue
+    return results
 
 
 @app.on_message(filters.command("short"))
@@ -77,12 +86,13 @@ async def short_urls(bot: Client, message: Message):
         return await message.reply_text("❌ Invalid or restricted URL.", parse_mode=ParseMode.MARKDOWN)
 
     try:
-        tiny, dagd, clck = await asyncio.to_thread(_shorten_sync, link)
+        shortened = await asyncio.to_thread(_shorten_sync, link)
+        if not shortened:
+            return await message.reply_text("❌ All URL shortener providers failed. Please try again later.")
 
-        markup = ikm([
-            [ikb("🔗 TinyURL", url=tiny)],
-            [ikb("🔗 Dagd", url=dagd), ikb("🔗 Clck.ru", url=clck)],
-        ])
+        buttons = [ikb(f"🔗 {label}", url=short_url) for label, short_url in shortened]
+        rows = [buttons[i : i + 2] for i in range(0, len(buttons), 2)]
+        markup = ikm(rows)
 
         await message.reply_text("🔍 Here are your shortened URLs:", reply_markup=markup)
 
