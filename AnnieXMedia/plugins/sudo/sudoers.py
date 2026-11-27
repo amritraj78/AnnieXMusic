@@ -41,12 +41,13 @@ async def remove_sudo_user(client, message: Message, _):
     user = await extract_user(message)
     if not user:
         return await message.reply_text(_["general_1"])
+    if user.id == OWNER_ID:
+        return await message.reply_text("❌ Cannot remove the bot owner from sudoers.")
     if user.id not in SUDOERS:
         return await message.reply_text(_["sudo_3"].format(user.mention))
 
     if await remove_sudo(user.id):
-        if user.id in SUDOERS:
-            SUDOERS.remove(user.id)
+        SUDOERS.discard(user.id)
         return await message.reply_text(_["sudo_4"].format(user.mention))
 
     await message.reply_text(_["sudo_8"])
@@ -77,6 +78,12 @@ async def sudoers_list(client, message: Message):
 async def view_sudo_list_callback(client, callback_query: CallbackQuery):
     if not callback_query.from_user or callback_query.from_user.id not in SUDOERS:
         return await callback_query.answer("ᴏɴʟʏ sᴜᴅᴏᴇʀs ᴀɴᴅ ᴏᴡɴᴇʀ ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜɪs", show_alert=True)
+    if not callback_query.message:
+        return await callback_query.answer()
+    try:
+        await callback_query.answer()
+    except Exception:
+        pass
 
     try:
         owner = await app.get_users(OWNER_ID)
@@ -86,17 +93,23 @@ async def view_sudo_list_callback(client, callback_query: CallbackQuery):
     caption = f"**˹ʟɪsᴛ ᴏғ ʙᴏᴛ ᴍᴏᴅᴇʀᴀᴛᴏʀs˼**\n\n**🌹Oᴡɴᴇʀ** ➥ {owner_mention}\n\n"
     keyboard = [[InlineKeyboardButton("๏ ᴠɪᴇᴡ ᴏᴡɴᴇʀ ๏", url=f"tg://openmessage?user_id={OWNER_ID}")]]
 
+    is_media = bool(callback_query.message.photo or callback_query.message.video)
+    max_len = 950 if is_media else 3900
+
     count = 0
-    for user_id in SUDOERS:
+    for user_id in list(SUDOERS):
         if user_id == OWNER_ID:
             continue
         try:
             user = await app.get_users(user_id)
             count += 1
-            caption += f"**🎁 Sᴜᴅᴏ {count} »** {user.mention}\n"
-            keyboard.append([
-                InlineKeyboardButton(f"๏ ᴠɪᴇᴡ sᴜᴅᴏ {count} ๏", url=f"tg://openmessage?user_id={user_id}")
-            ])
+            line = f"**🎁 Sᴜᴅᴏ {count} »** {user.mention}\n"
+            if len(caption) + len(line) < max_len:
+                caption += line
+            if len(keyboard) < 95:
+                keyboard.append([
+                    InlineKeyboardButton(f"๏ ᴠɪᴇᴡ sᴜᴅᴏ {count} ๏", url=f"tg://openmessage?user_id={user_id}")
+                ])
         except Exception:
             continue
 
@@ -104,15 +117,26 @@ async def view_sudo_list_callback(client, callback_query: CallbackQuery):
         caption += "_No additional sudoers yet._"
 
     keyboard.append([InlineKeyboardButton("๏ ʙᴀᴄᴋ ๏", callback_data="sudo_list_back")])
-    if callback_query.message.photo or callback_query.message.video:
-        await callback_query.message.edit_caption(caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
-    else:
-        await callback_query.message.edit_text(text=caption, reply_markup=InlineKeyboardMarkup(keyboard))
+    try:
+        if is_media:
+            await callback_query.message.edit_caption(caption=caption, reply_markup=InlineKeyboardMarkup(keyboard))
+        else:
+            await callback_query.message.edit_text(text=caption, reply_markup=InlineKeyboardMarkup(keyboard))
+    except Exception:
+        pass
 
 # ─── Callback: Back to List Menu ────────────────────────────
 
 @app.on_callback_query(filters.regex("^sudo_list_back$"))
 async def back_to_sudo_list_menu(client, callback_query: CallbackQuery):
+    if not callback_query.from_user or callback_query.from_user.id not in SUDOERS:
+        return await callback_query.answer("ᴏɴʟʏ sᴜᴅᴏᴇʀs ᴀɴᴅ ᴏᴡɴᴇʀ ᴄᴀɴ ᴀᴄᴄᴇss ᴛʜɪs", show_alert=True)
+    if not callback_query.message:
+        return await callback_query.answer()
+    try:
+        await callback_query.answer()
+    except Exception:
+        pass
     keyboard = [[InlineKeyboardButton("๏ ᴠɪᴇᴡ sᴜᴅᴏʟɪsᴛ ๏", callback_data="sudo_list_view")]]
     reply_markup = InlineKeyboardMarkup(keyboard)
     caption = "**» ᴄʜᴇᴄᴋ sᴜᴅᴏ ʟɪsᴛ ʙʏ ɢɪᴠᴇɴ ʙᴇʟᴏᴡ ʙᴜᴛᴛᴏɴ.**\n\n**» ɴᴏᴛᴇ:**  ᴏɴʟʏ sᴜᴅᴏ ᴜsᴇʀs ᴄᴀɴ ᴠɪᴇᴡ."

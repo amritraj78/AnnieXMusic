@@ -15,7 +15,13 @@ from AnnieXMedia.utils.decorators.language import language, languageCB
 from AnnieXMedia.utils.inline import queue_back_markup, queue_markup
 from config import BANNED_USERS
 
-basic = {}
+basic: dict[tuple[int, str], bool] = {}
+
+
+def _set_basic(chat_id: int, videoid: str, val: bool) -> None:
+    if len(basic) > 1000:
+        basic.clear()
+    basic[(chat_id, videoid)] = val
 
 
 def get_image(videoid):
@@ -52,7 +58,7 @@ async def get_queue(client, message: Message, _):
             return await message.reply_text(_["setting_7"])
         try:
             await app.get_chat(chat_id)
-        except:
+        except Exception:
             return await message.reply_text(_["cplay_4"])
         cplay = True
     else:
@@ -100,17 +106,17 @@ async def get_queue(client, message: Message, _):
             got[0]["dur"],
         )
     )
-    basic[videoid] = True
+    _set_basic(chat_id, videoid, True)
     try:
-        mystic = await message.reply_photo(IMAGE, caption=cap, reply_markup=upl)
+        mystic = await message.reply_photo(IMAGE, caption=cap[:1024], reply_markup=upl)
     except Exception:
-        mystic = await message.reply_text(cap, reply_markup=upl)
+        mystic = await message.reply_text(cap[:4096], reply_markup=upl)
     if DUR != "Unknown":
         try:
             while db.get(chat_id) and db[chat_id][0].get("vidid") == videoid:
                 await asyncio.sleep(5)
                 if await is_active_chat(chat_id):
-                    if basic.get(videoid) and db.get(chat_id):
+                    if basic.get((chat_id, videoid)) and db.get(chat_id):
                         if await is_music_playing(chat_id):
                             try:
                                 buttons = queue_markup(
@@ -132,7 +138,7 @@ async def get_queue(client, message: Message, _):
                         break
                 else:
                     break
-        except:
+        except Exception:
             return
 
 
@@ -140,19 +146,23 @@ async def get_queue(client, message: Message, _):
 async def quite_timer(client, CallbackQuery: CallbackQuery):
     try:
         await CallbackQuery.answer()
-    except:
+    except Exception:
         pass
 
 
 @app.on_callback_query(filters.regex("GetQueued") & ~BANNED_USERS)
 @languageCB
 async def queued_tracks(client, CallbackQuery: CallbackQuery, _):
+    if not CallbackQuery.message:
+        return await CallbackQuery.answer()
     callback_data = CallbackQuery.data.strip()
-    callback_request = callback_data.split(None, 1)[1]
-    what, videoid = callback_request.split("|")
+    parts = callback_data.split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return await CallbackQuery.answer()
+    what, videoid = parts[1].split("|", 1)
     try:
         chat_id, channel = await get_channeplayCB(_, what, CallbackQuery)
-    except:
+    except Exception:
         return
     if not await is_active_chat(chat_id):
         return await CallbackQuery.answer(_["general_5"], show_alert=True)
@@ -162,45 +172,57 @@ async def queued_tracks(client, CallbackQuery: CallbackQuery, _):
     if len(got) == 1:
         return await CallbackQuery.answer(_["queue_5"], show_alert=True)
     await CallbackQuery.answer()
-    basic[videoid] = False
+    _set_basic(chat_id, videoid, False)
     buttons = queue_back_markup(_, what)
+    queue_photo_url = "https://telegra.ph//file/6f7d35131f69951c74ee5.jpg"
     med = InputMediaPhoto(
-        media="https://telegra.ph//file/6f7d35131f69951c74ee5.jpg",
+        media=queue_photo_url,
         caption=_["queue_1"],
     )
-    await CallbackQuery.edit_message_media(media=med)
-    j = 0
+    try:
+        await CallbackQuery.edit_message_media(media=med)
+    except Exception:
+        pass
     msg = ""
-    for x in got:
-        j += 1
+    for j, x in enumerate(got, 1):
         if j == 1:
             msg += f'Streaming :\n\n✨ Title : {x["title"]}\nDuration : {x["dur"]}\nBy : {x["by"]}\n\n'
         elif j == 2:
             msg += f'Queued :\n\n✨ Title : {x["title"]}\nDuration : {x["dur"]}\nBy : {x["by"]}\n\n'
         else:
             msg += f'✨ Title : {x["title"]}\nDuration : {x["dur"]}\nBy : {x["by"]}\n\n'
-    if "Queued" in msg:
-        if len(msg) < 700:
-            await asyncio.sleep(1)
-            return await CallbackQuery.edit_message_text(msg, reply_markup=buttons)
+    if "Queued" in msg and len(msg) >= 950:
         if "✨" in msg:
             msg = msg.replace("✨", "")
         link = await ANNIEBIN(msg)
-        med = InputMediaPhoto(media=link, caption=_["queue_3"].format(link))
-        await CallbackQuery.edit_message_media(media=med, reply_markup=buttons)
+        med = InputMediaPhoto(media=queue_photo_url, caption=_["queue_3"].format(link)[:1024])
+        try:
+            await CallbackQuery.edit_message_media(media=med, reply_markup=buttons)
+        except Exception:
+            await CallbackQuery.edit_message_caption(caption=_["queue_3"].format(link)[:1024], reply_markup=buttons)
     else:
         await asyncio.sleep(1)
-        return await CallbackQuery.edit_message_text(msg, reply_markup=buttons)
+        try:
+            if CallbackQuery.message.photo or CallbackQuery.message.video:
+                return await CallbackQuery.edit_message_caption(caption=msg[:1024], reply_markup=buttons)
+            return await CallbackQuery.edit_message_text(msg[:4096], reply_markup=buttons)
+        except Exception:
+            return
 
 
 @app.on_callback_query(filters.regex("queue_back_timer") & ~BANNED_USERS)
 @languageCB
 async def queue_back(client, CallbackQuery: CallbackQuery, _):
+    if not CallbackQuery.message:
+        return await CallbackQuery.answer()
     callback_data = CallbackQuery.data.strip()
-    cplay = callback_data.split(None, 1)[1]
+    parts = callback_data.split(None, 1)
+    if len(parts) < 2:
+        return await CallbackQuery.answer()
+    cplay = parts[1]
     try:
         chat_id, channel = await get_channeplayCB(_, cplay, CallbackQuery)
-    except:
+    except Exception:
         return
     if not await is_active_chat(chat_id):
         return await CallbackQuery.answer(_["general_5"], show_alert=True)
@@ -245,16 +267,16 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
             got[0]["dur"],
         )
     )
-    basic[videoid] = True
+    _set_basic(chat_id, videoid, True)
 
-    med = InputMediaPhoto(media=IMAGE, caption=cap)
+    med = InputMediaPhoto(media=IMAGE, caption=cap[:1024])
     mystic = await CallbackQuery.edit_message_media(media=med, reply_markup=upl)
     if DUR != "Unknown":
         try:
-            while db[chat_id][0]["vidid"] == videoid:
+            while db.get(chat_id) and db[chat_id][0].get("vidid") == videoid:
                 await asyncio.sleep(5)
                 if await is_active_chat(chat_id):
-                    if basic[videoid]:
+                    if basic.get((chat_id, videoid)) and db.get(chat_id):
                         if await is_music_playing(chat_id):
                             try:
                                 buttons = queue_markup(
@@ -268,11 +290,13 @@ async def queue_back(client, CallbackQuery: CallbackQuery, _):
                                 await mystic.edit_reply_markup(reply_markup=buttons)
                             except FloodWait:
                                 pass
+                            except Exception:
+                                pass
                         else:
                             pass
                     else:
                         break
                 else:
                     break
-        except:
+        except Exception:
             return

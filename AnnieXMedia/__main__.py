@@ -1,12 +1,14 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import contextlib
 import importlib
+import sys
 
 from pyrogram import idle
 from pytgcalls.exceptions import NoActiveGroupCall
 
 import config
-from AnnieXMedia import LOGGER, app, userbot
+from AnnieXMedia import Carbon, LOGGER, app, userbot
 from AnnieXMedia.core.call import StreamController
 from AnnieXMedia.core.dir import prune_storage_cache
 from AnnieXMedia.core.mongo import ensure_indexes
@@ -31,8 +33,14 @@ async def _periodic_storage_cleanup(interval_seconds: int = 1800):
 async def init():
     # Start healthcheck & Mini App web server for Koyeb / Render / PaaS deployment
     await start_web_server()
+
+    if not config.BOT_TOKEN or not str(config.BOT_TOKEN).strip():
+        LOGGER(__name__).error("BOT_TOKEN is missing! Set BOT_TOKEN in environment variables.")
+        await stop_web_server()
+        sys.exit(1)
+
     await ensure_indexes()
-    prune_storage_cache(max_age_seconds=3600)
+    await asyncio.to_thread(prune_storage_cache, 3600)
 
     if (
         not config.STRING1
@@ -43,15 +51,13 @@ async def init():
     ):
         LOGGER(__name__).error("ᴀssɪsᴛᴀɴᴛ sᴇssɪᴏɴ ɴᴏᴛ ғɪʟʟᴇᴅ, ᴘʟᴇᴀsᴇ ғɪʟʟ ᴀ ᴘʏʀᴏɢʀᴀᴍ sᴇssɪᴏɴ...")
         await stop_web_server()
-        exit()
+        sys.exit(1)
 
-    # ✅ Try to fetch cookies at startup
     try:
         await fetch_and_store_cookies()
         LOGGER("AnnieXMedia").info("ʏᴏᴜᴛᴜʙᴇ ᴄᴏᴏᴋɪᴇs ʟᴏᴀᴅᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ ✅")
     except Exception as e:
         LOGGER("AnnieXMedia").warning(f"⚠️ᴄᴏᴏᴋɪᴇ ᴇʀʀᴏʀ: {e}")
-
 
     await sudo()
 
@@ -62,8 +68,8 @@ async def init():
         users = await get_banned_users()
         for user_id in users:
             BANNED_USERS.add(user_id)
-    except:
-        pass
+    except Exception as e:
+        LOGGER("AnnieXMedia").warning(f"Failed to preload banned users: {e}")
 
     await app.start()
     for all_module in ALL_MODULES:
@@ -92,12 +98,20 @@ async def init():
         await idle()
     finally:
         cleanup_task.cancel()
-        await app.stop()
-        await userbot.stop()
-        await close_http_session()
-        await stop_web_server()
+        with contextlib.suppress(asyncio.CancelledError, Exception):
+            await cleanup_task
+        for step in (
+            StreamController.stop,
+            app.stop,
+            userbot.stop,
+            Carbon.close,
+            close_http_session,
+            stop_web_server,
+        ):
+            with contextlib.suppress(Exception):
+                await step()
         LOGGER("AnnieXMedia").info("sᴛᴏᴘᴘɪɴɢ ᴀɴɴɪᴇ ᴍᴜsɪᴄ ʙᴏᴛ ...")
 
 
 if __name__ == "__main__":
-    asyncio.get_event_loop().run_until_complete(init())
+    asyncio.run(init())

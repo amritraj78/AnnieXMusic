@@ -18,11 +18,6 @@ _boot_ = time.time()
 def is_heroku():
     return "heroku" in socket.getfqdn()
 
-XCB = [
-    "/", "@", ".", "com", ":", "git", "heroku", "push",
-    str(HEROKU_API_KEY), "https", str(HEROKU_APP_NAME),
-    "HEAD", "master"
-]
 
 def dbb():
     global db

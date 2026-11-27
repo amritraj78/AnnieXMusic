@@ -3,55 +3,13 @@ from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardButton as ikb, InlineKeyboardMarkup as ikm, Message
 from pyrogram.enums import ChatAction, ParseMode
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
+from AnnieXMedia.utils.security import fetch_url_limited, is_safe_http_url
 import asyncio
-import socket
-import ipaddress
-from urllib.parse import urljoin, urlparse
 import pyshorteners
-import httpx
 
 
 shortener = pyshorteners.Shortener()
-
-
-def _is_ip_restricted(ip_obj) -> bool:
-    if isinstance(ip_obj, ipaddress.IPv6Address) and ip_obj.ipv4_mapped:
-        ip_obj = ip_obj.ipv4_mapped
-    return (
-        ip_obj.is_private
-        or ip_obj.is_loopback
-        or ip_obj.is_link_local
-        or ip_obj.is_reserved
-        or ip_obj.is_multicast
-        or ip_obj.is_unspecified
-    )
-
-
-def _is_safe_url_sync(url: str) -> bool:
-    try:
-        parsed = urlparse(url)
-        if parsed.scheme not in ("http", "https"):
-            return False
-        host = parsed.hostname
-        if not host:
-            return False
-        if host.lower() in ("localhost", "127.0.0.1", "0.0.0.0", "::1", "metadata.google.internal"):
-            return False
-        infos = socket.getaddrinfo(host, None)
-        if not infos:
-            return False
-        for _, _, _, _, sockaddr in infos:
-            ip_str = sockaddr[0].split("%", 1)[0]
-            ip_obj = ipaddress.ip_address(ip_str)
-            if _is_ip_restricted(ip_obj):
-                return False
-        return True
-    except Exception:
-        return False
-
-
-async def is_safe_url(url: str) -> bool:
-    return await asyncio.to_thread(_is_safe_url_sync, url)
 
 
 def _shorten_sync(link: str) -> list[tuple[str, str]]:
@@ -81,8 +39,8 @@ async def short_urls(bot: Client, message: Message):
             parse_mode=ParseMode.MARKDOWN
         )
 
-    link = message.command[1]
-    if not await is_safe_url(link):
+    link = message.command[1].strip()
+    if not await is_safe_http_url(link):
         return await message.reply_text("❌ Invalid or restricted URL.", parse_mode=ParseMode.MARKDOWN)
 
     try:
@@ -97,7 +55,7 @@ async def short_urls(bot: Client, message: Message):
         await message.reply_text("🔍 Here are your shortened URLs:", reply_markup=markup)
 
     except Exception as e:
-        print(f"Shortener error: {e}")
+        LOGGER(__name__).warning(f"Shortener error: {e}")
         await message.reply_text("❌ Failed to shorten the link. It might already be shortened or invalid.")
 
 
@@ -111,25 +69,40 @@ async def unshort_url(bot: Client, message: Message):
             parse_mode=ParseMode.MARKDOWN
         )
 
-    current_url = message.command[1]
+    raw_url = message.command[1].strip()
 
     try:
-        async with httpx.AsyncClient(follow_redirects=False, timeout=10.0) as client:
-            for _ in range(5):
-                if not await is_safe_url(current_url):
-                    return await message.reply_text("❌ Invalid or restricted URL.", parse_mode=ParseMode.MARKDOWN)
-                response = await client.get(current_url)
-                if response.is_redirect and "location" in response.headers:
-                    current_url = urljoin(current_url, response.headers["location"])
-                    continue
-                break
-        if not await is_safe_url(current_url):
-            return await message.reply_text("❌ Final redirect points to a restricted address.", parse_mode=ParseMode.MARKDOWN)
-        final_url = current_url
+        ok, status, final_or_err, _ = await fetch_url_limited(
+            raw_url,
+            max_bytes=4096,
+            max_redirects=5,
+            timeout=10.0,
+            head_only_redirects=True,
+        )
+        if ok and status == 405:
+            ok, status, final_or_err, _ = await fetch_url_limited(
+                raw_url,
+                max_bytes=65536,
+                max_redirects=5,
+                timeout=10.0,
+                head_only_redirects=False,
+            )
+        if not ok or not final_or_err.startswith(("http://", "https://")):
+            safe_err = final_or_err.replace("`", "'")
+            return await message.reply_text(
+                f"❌ {safe_err}",
+                parse_mode=ParseMode.MARKDOWN,
+            )
 
+        final_url = final_or_err
+        safe_final = final_url.replace("`", "'")
         markup = ikm([[ikb("🔗 View Final URL", url=final_url)]])
-        await message.reply_text(f"✅ **Unshortened URL:**\n`{final_url}`", reply_markup=markup, parse_mode=ParseMode.MARKDOWN)
+        await message.reply_text(
+            f"✅ **Unshortened URL:**\n`{safe_final}`",
+            reply_markup=markup,
+            parse_mode=ParseMode.MARKDOWN,
+        )
 
     except Exception as e:
-        print(f"Unshortener error: {e}")
+        LOGGER(__name__).warning(f"Unshortener error: {e}")
         await message.reply_text("❌ Failed to unshorten the link. It may be broken or invalid.")

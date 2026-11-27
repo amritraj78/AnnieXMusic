@@ -186,24 +186,31 @@ def PlayWrapper(command):
                         ),
                     )
             except UserNotParticipant:
-                if chat_id in links:
-                    invitelink = links[chat_id]
+                try:
+                    target_chat = await app.get_chat(chat_id)
+                except Exception:
+                    target_chat = None
+                if target_chat and getattr(target_chat, "username", None):
+                    invitelink = target_chat.username
+                    try:
+                        await userbot.resolve_peer(invitelink)
+                    except Exception:
+                        pass
+                elif chat_id == message.chat.id and message.chat.username:
+                    invitelink = message.chat.username
+                    try:
+                        await userbot.resolve_peer(invitelink)
+                    except Exception:
+                        pass
                 else:
-                    if message.chat.username:
-                        invitelink = message.chat.username
-                        try:
-                            await userbot.resolve_peer(invitelink)
-                        except Exception:
-                            pass
-                    else:
-                        try:
-                            invitelink = await app.export_chat_invite_link(chat_id)
-                        except ChatAdminRequired:
-                            return await message.reply_text(_["call_1"])
-                        except Exception as e:
-                            return await message.reply_text(
-                                _["call_3"].format(app.mention, type(e).__name__)
-                            )
+                    try:
+                        invitelink = await app.export_chat_invite_link(chat_id)
+                    except ChatAdminRequired:
+                        return await message.reply_text(_["call_1"])
+                    except Exception as e:
+                        return await message.reply_text(
+                            _["call_3"].format(app.mention, type(e).__name__)
+                        )
 
                 if invitelink and invitelink.startswith("https://t.me/+"):
                     invitelink = invitelink.replace(

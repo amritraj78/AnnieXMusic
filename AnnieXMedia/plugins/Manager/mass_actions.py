@@ -29,6 +29,7 @@ from AnnieXMedia import app
 from AnnieXMedia.utils.permissions import is_owner_or_sudoer, mention
 
 MASS_CMDS = ["kickall", "banall", "unbanall", "muteall", "unmuteall", "unpinall"]
+_active_mass_chats: set[int] = set()
 
 
 def _confirmation_keyboard(cmd: str) -> InlineKeyboardMarkup:
@@ -59,11 +60,11 @@ async def ask_mass_confirm(client: Client, message: Message):
 
 @app.on_callback_query(filters.regex(rf"^({'|'.join(MASS_CMDS)})_(yes|no)$"))
 async def handle_mass_confirm(client: Client, callback: CallbackQuery):
-    if not callback.from_user:
+    if not callback.from_user or not callback.message:
         return await callback.answer("Action not allowed.", show_alert=True)
 
     data = callback.data
-    cmd, answer = data.split("_")
+    cmd, answer = data.split("_", 1)
     chat_id = callback.message.chat.id
     uid = callback.from_user.id
 
@@ -72,7 +73,11 @@ async def handle_mass_confirm(client: Client, callback: CallbackQuery):
         return await callback.answer("Only the group owner can confirm.", show_alert=True)
 
     if answer == "no":
+        await callback.answer("Cancelled.")
         return await callback.message.edit(f"❌ `{cmd}` canceled.")
+
+    if chat_id in _active_mass_chats:
+        return await callback.answer("A mass action is already running in this chat.", show_alert=True)
 
     try:
         bot_member = await client.get_chat_member(chat_id, client.me.id)
@@ -93,25 +98,35 @@ async def handle_mass_confirm(client: Client, callback: CallbackQuery):
     if not needed.get(cmd, False):
         return await callback.message.edit("❌ I lack necessary permissions.")
 
+    await callback.answer(f"Starting {cmd}...")
     await callback.message.edit(f"⏳ `{cmd}` in progress…")
+    _active_mass_chats.add(chat_id)
 
-    try:
-        if cmd == "kickall":
-            await _do_kickall(client, chat_id)
-        elif cmd == "banall":
-            await _do_banall(client, chat_id)
-        elif cmd == "unbanall":
-            await _do_unbanall(client, chat_id)
-        elif cmd == "muteall":
-            await _do_muteall(client, chat_id)
-        elif cmd == "unmuteall":
-            await _do_unmuteall(client, chat_id)
-        elif cmd == "unpinall":
-            await _do_unpinall(client, chat_id)
+    async def _run_job():
+        try:
+            if cmd == "kickall":
+                await _do_kickall(client, chat_id)
+            elif cmd == "banall":
+                await _do_banall(client, chat_id)
+            elif cmd == "unbanall":
+                await _do_unbanall(client, chat_id)
+            elif cmd == "muteall":
+                await _do_muteall(client, chat_id)
+            elif cmd == "unmuteall":
+                await _do_unmuteall(client, chat_id)
+            elif cmd == "unpinall":
+                await _do_unpinall(client, chat_id)
 
-        await callback.message.edit(f"✅ `{cmd}` completed.")
-    except Exception as e:
-        await callback.message.edit(f"❌ Error during `{cmd}`:\n{e}")
+            await callback.message.edit(f"✅ `{cmd}` completed.")
+        except Exception as e:
+            try:
+                await callback.message.edit(f"❌ Error during `{cmd}`:\n{e}")
+            except Exception:
+                pass
+        finally:
+            _active_mass_chats.discard(chat_id)
+
+    asyncio.create_task(_run_job())
 
 
 # ─────────────────────────────────────────────────────
@@ -119,8 +134,14 @@ async def handle_mass_confirm(client: Client, callback: CallbackQuery):
 # ─────────────────────────────────────────────────────
 async def _do_kickall(client, chat_id: int):
     kicked, errors = 0, 0
+    me_id = client.me.id if getattr(client, "me", None) else None
     async for m in client.get_chat_members(chat_id):
-        if not m.user or m.user.is_bot or m.status == ChatMemberStatus.OWNER:
+        if (
+            not m.user
+            or m.user.is_bot
+            or m.user.id == me_id
+            or m.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+        ):
             continue
         try:
             await client.ban_chat_member(chat_id, m.user.id)
@@ -137,8 +158,14 @@ async def _do_kickall(client, chat_id: int):
 
 async def _do_banall(client, chat_id: int):
     banned, errors = 0, 0
+    me_id = client.me.id if getattr(client, "me", None) else None
     async for m in client.get_chat_members(chat_id):
-        if not m.user or m.user.is_bot or m.status == ChatMemberStatus.OWNER:
+        if (
+            not m.user
+            or m.user.is_bot
+            or m.user.id == me_id
+            or m.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+        ):
             continue
         try:
             await client.ban_chat_member(chat_id, m.user.id)

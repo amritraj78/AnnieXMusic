@@ -1,5 +1,5 @@
 # Authored By Certified Coders © 2025
-from datetime import datetime
+from datetime import datetime, timezone
 from pyrogram import filters
 from pyrogram.types import (
     CallbackQuery,
@@ -7,7 +7,7 @@ from pyrogram.types import (
     InlineKeyboardMarkup,
     Message,
 )
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ChatMemberStatus, ChatType, ParseMode
 from config import OWNER_ID, LOGGER_ID
 from AnnieXMedia import app
 
@@ -22,7 +22,7 @@ def escape_md(text: str) -> str:
 
 @app.on_message(filters.command("bug"))
 async def report_bug(_, msg: Message):
-    if msg.chat.type == "private":
+    if msg.chat.type == ChatType.PRIVATE:
         return await msg.reply_text("**ᴛʜɪs ᴄᴏᴍᴍᴀɴᴅ ɪs ᴏɴʟʏ ғᴏʀ ɢʀᴏᴜᴘs.**")
 
     if not msg.from_user:
@@ -42,7 +42,7 @@ async def report_bug(_, msg: Message):
         else f"ᴘʀɪᴠᴀᴛᴇ ɢʀᴏᴜᴘ/`{msg.chat.id}`"
     )
 
-    current_date = datetime.utcnow().strftime("%d-%m-%Y")
+    current_date = datetime.now(timezone.utc).strftime("%d-%m-%Y")
 
     bug_report = (
         f"**#ʙᴜɢ ʀᴇᴘᴏʀᴛ**\n"
@@ -83,13 +83,21 @@ async def report_bug(_, msg: Message):
         pass
 
 
-@app.on_callback_query(filters.regex("close_send_photo"))
+@app.on_callback_query(filters.regex(r"^close_send_photo$"))
 async def close_bug_report(_, query: CallbackQuery):
+    if not query.message or not query.from_user:
+        return await query.answer()
     try:
         member = await app.get_chat_member(query.message.chat.id, query.from_user.id)
-        if not member.privileges or not member.privileges.can_delete_messages:
+        is_owner = member.status == ChatMemberStatus.OWNER
+        can_del = bool(member.privileges and member.privileges.can_delete_messages)
+        if not (is_owner or can_del):
             return await query.answer("ʏᴏᴜ ᴅᴏɴ'ᴛ ʜᴀᴠᴇ ᴘᴇʀᴍɪssɪᴏɴ ᴛᴏ ᴅᴇʟᴇᴛᴇ ᴛʜɪs.", show_alert=True)
-    except:
+    except Exception:
         return await query.answer("ᴄᴏᴜʟᴅ ɴᴏᴛ ᴠᴇʀɪғʏ ᴀᴄᴄᴇss.", show_alert=True)
 
-    await query.message.delete()
+    await query.answer()
+    try:
+        await query.message.delete()
+    except Exception:
+        pass

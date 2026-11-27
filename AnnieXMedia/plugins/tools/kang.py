@@ -2,9 +2,7 @@
 import os
 import asyncio
 import shutil
-import subprocess
 import tempfile
-import traceback
 import inspect
 from typing import Tuple
 
@@ -21,10 +19,12 @@ from pyrogram.errors import (
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.utils.files import resize_file_to_sticker_size
 from config import BOT_USERNAME
 
 BOT = BOT_USERNAME.lstrip("@").lower()
+_MAX_INPUT_BYTES = 20 * 1024 * 1024
 
 
 def _cs_kwargs(is_anim: bool, is_vid: bool) -> dict:
@@ -55,12 +55,14 @@ def _pack_name(user_id: int, *, animated=False, video=False, index=0) -> str:
 
 def _pack_title(username: str, *, animated=False, video=False, index=0) -> str:
     """
-    Human‑readable pack title:
+    Human‑readable pack title (max 64 chars per Telegram Bot API):
       <User>'s Sticker/Animated/Video Pack [<index>]
     """
     kind = "Animated" if animated else "Video" if video else "Sticker"
     suffix = f" {index}" if index else ""
-    return f"{username}'s {kind} Pack{suffix}"
+    tail = f"'s {kind} Pack{suffix}"
+    max_user = max(1, 64 - len(tail))
+    return f"{(username or 'User')[:max_user]}{tail}"
 
 
 def _to_input_doc(doc: raw.base.Document) -> raw.types.InputDocument:
@@ -74,6 +76,17 @@ def _to_input_doc(doc: raw.base.Document) -> raw.types.InputDocument:
     )
 
 
+async def _download_checked(msg, dest_path: str) -> str:
+    media = msg.sticker or msg.photo or msg.video or msg.animation or msg.document
+    size = getattr(media, "file_size", 0) or 0
+    if size > _MAX_INPUT_BYTES:
+        raise ValueError("Media file exceeds 20 MB limit.")
+    downloaded = await msg.download(dest_path)
+    if not downloaded or not os.path.exists(downloaded):
+        raise RuntimeError("Failed to download media.")
+    return downloaded
+
+
 async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool, bool]:
     r = message.reply_to_message
 
@@ -81,14 +94,14 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
         await notify.edit("➣ ᴘʀᴏᴄᴇssɪɴɢ sᴛɪᴄᴋᴇʀ…")
         s = r.sticker
         if s.is_animated:
-            return "sticker", await r.download(os.path.join(tmp_dir, "sticker.tgs")), True, False
+            return "sticker", await _download_checked(r, os.path.join(tmp_dir, "sticker.tgs")), True, False
         if s.is_video:
-            return "sticker", await r.download(os.path.join(tmp_dir, "sticker.webm")), False, True
-        return "sticker", await r.download(os.path.join(tmp_dir, "sticker.png")), False, False
+            return "sticker", await _download_checked(r, os.path.join(tmp_dir, "sticker.webm")), False, True
+        return "sticker", await _download_checked(r, os.path.join(tmp_dir, "sticker.png")), False, False
 
     if r.photo or (r.document and r.document.mime_type and r.document.mime_type.startswith("image/")):
         await notify.edit("➣ ᴄᴏɴᴠᴇʀᴛɪɴɢ ɪᴍᴀɢᴇ…")
-        p = await r.download(os.path.join(tmp_dir, "image"))
+        p = await _download_checked(r, os.path.join(tmp_dir, "image"))
         p = await resize_file_to_sticker_size(p)
         return "image", p, False, False
 
@@ -100,7 +113,7 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
         ))
     ):
         await notify.edit("➣ ᴘʀᴏᴄᴇssɪɴɢ ɢɪꜰ/ᴠɪᴅᴇᴏ…")
-        raw_v = await r.download(os.path.join(tmp_dir, "raw.mp4"))
+        raw_v = await _download_checked(r, os.path.join(tmp_dir, "raw.mp4"))
         out_v = os.path.join(tmp_dir, "sticker.webm")
         cmd = [
             "ffmpeg", "-y", "-i", raw_v,
@@ -113,9 +126,17 @@ async def _prepare_media(message, tmp_dir: str, notify) -> Tuple[str, str, bool,
         proc = await asyncio.create_subprocess_exec(
             *cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE
         )
-        _, stderr = await proc.communicate()
+        try:
+            _, stderr = await asyncio.wait_for(proc.communicate(), timeout=25.0)
+        except asyncio.TimeoutError:
+            try:
+                proc.kill()
+                await proc.wait()
+            except Exception:
+                pass
+            raise RuntimeError("Video conversion timed out.")
         if proc.returncode != 0:
-            raise RuntimeError(stderr.decode())
+            raise RuntimeError(stderr.decode("utf-8", errors="replace")[:300])
         return "video", out_v, False, True
 
     raise ValueError("unsupported media type")
@@ -231,10 +252,13 @@ async def kang(client, message):
         )
 
     except FloodWait as e:
-        await notify.edit(f"flood wait – retry in {e.x}s")
+        await notify.edit(f"flood wait – retry in {e.value}s")
     except (StickerEmojiInvalid, PeerIdInvalid, FileReferenceExpired, RPCError) as err:
         await notify.edit(f"error: {err}")
-    except Exception:
-        await notify.edit("unexpected error:\n" + traceback.format_exc()[:1000])
+    except ValueError as err:
+        await notify.edit(f"error: {err}")
+    except Exception as err:
+        LOGGER(__name__).exception("Kang failed")
+        await notify.edit(f"unexpected error: {err}")
     finally:
         shutil.rmtree(tmp_dir, ignore_errors=True)

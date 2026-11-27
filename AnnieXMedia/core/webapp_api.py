@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import html
 import json
 import re
@@ -35,6 +36,7 @@ from AnnieXMedia.utils.database import (
 )
 from AnnieXMedia.utils.formatters import int_to_alpha, seconds_to_min
 from AnnieXMedia.utils.inline import aq_markup, stream_markup
+from AnnieXMedia.utils.security import is_safe_http_url
 from AnnieXMedia.utils.stream.queue import put_queue
 from AnnieXMedia.utils.thumbnails import get_thumb
 from config import BANNED_USERS, time_to_seconds
@@ -162,20 +164,27 @@ async def _handle_overview(headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]
     active_ids = list(await get_active_chats())
     sessions: List[Dict[str, Any]] = []
     if user:
-        candidate_ids = list(dict.fromkeys(active_ids + ([config.LOGGER_ID] if config.LOGGER_ID < 0 else [])))
-        for cid in candidate_ids[:10]:
-            is_member, can_ctrl, chat_title = await _is_chat_admin(int(cid), uid)
+        extra = [config.LOGGER_ID] if (is_sudo and config.LOGGER_ID < 0) else []
+        candidate_ids = [int(c) for c in list(dict.fromkeys(active_ids + extra))[:10]]
+        checks = await asyncio.gather(
+            *(_is_chat_admin(cid, uid) for cid in candidate_ids),
+            return_exceptions=True,
+        )
+        for cid, chk in zip(candidate_ids, checks):
+            if isinstance(chk, Exception):
+                continue
+            is_member, can_ctrl, chat_title = chk
             if not is_member:
                 continue
-            q_items = db.get(int(cid)) or []
-            is_active = int(cid) in active_ids and bool(q_items)
+            q_items = db.get(cid) or []
+            is_active = cid in active_ids and bool(q_items)
             sessions.append(
                 {
-                    "chat_id": int(cid),
+                    "chat_id": cid,
                     "title": chat_title,
                     "active": is_active,
-                    "playing": await is_music_playing(int(cid)) if is_active else False,
-                    "loop": await get_loop(int(cid)) if is_active else 0,
+                    "playing": await is_music_playing(cid) if is_active else False,
+                    "loop": await get_loop(cid) if is_active else 0,
                     "current": _serialize_track(q_items[0]) if q_items else None,
                     "queue": [_serialize_track(t) for t in q_items[1:12]] if len(q_items) > 1 else [],
                     "queue_count": len(q_items),
@@ -288,6 +297,10 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
     if not query or len(query) > 200:
         return 400, {"error": "Provide a song name or YouTube URL."}
 
+    if "://" in query:
+        if not await YouTube.exists(query) or not await is_safe_http_url(query):
+            return 400, {"error": "Only public YouTube URLs or song names are supported."}
+
     is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
     if not is_member:
         return 403, {"error": "You must be a member of that group to queue music."}
@@ -296,21 +309,22 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
     if playtype != "Everyone" and not can_ctrl:
         return 403, {"error": "Only admins can play music in this group."}
 
-    if _YOUTUBE_ID_RE.match(hint_vidid) and hint_title and hint_dur:
-        vidid = hint_vidid
-        details = {"title": hint_title, "duration_min": hint_dur, "thumb": hint_thumb}
-    else:
-        try:
-            details, vidid = await YouTube.track(query)
-        except Exception as exc:
-            return 404, {"error": f"Could not resolve track: {exc}"}
+    resolve_target = hint_vidid if _YOUTUBE_ID_RE.match(hint_vidid) else query
+    try:
+        details, vidid = await YouTube.track(resolve_target)
+    except Exception:
+        return 404, {"error": "Could not resolve track details."}
 
     title = str(details.get("title") or hint_title or "Unknown").title()
-    duration_min = details.get("duration_min") or (hint_dur or None)
+    duration_min = details.get("duration_min")
     if not duration_min:
         return 400, {"error": "Live streams are not supported from the Mini App."}
-    if time_to_seconds(duration_min) > config.DURATION_LIMIT:
+    dur_sec = time_to_seconds(duration_min)
+    if dur_sec <= 0 or dur_sec > config.DURATION_LIMIT:
         return 400, {"error": f"Track exceeds duration limit ({config.DURATION_LIMIT_MIN} min)."}
+
+    safe_title = html.escape(title)
+    safe_dur = html.escape(str(duration_min))
 
     try:
         file_path, direct = await YouTube.download(
@@ -346,7 +360,7 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
             try:
                 await app.send_message(
                     chat_id=chat_id,
-                    text=_["queue_4"].format(pos, title[:27], duration_min, user_mention),
+                    text=_["queue_4"].format(pos, safe_title[:27], safe_dur, user_mention),
                     reply_markup=InlineKeyboardMarkup(aq_markup(_, chat_id)),
                 )
             except Exception:
@@ -372,8 +386,8 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
             img = await get_thumb(vidid)
             cap = _["stream_1"].format(
                 f"https://t.me/{app.username}?start=info_{vidid}",
-                title[:23],
-                duration_min,
+                safe_title[:23],
+                safe_dur,
                 user_mention,
             )
             run = await app.send_photo(
@@ -397,11 +411,16 @@ async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tupl
     if not auth:
         return 401, {"error": "Telegram authentication required."}
     uid = int(auth["user"]["id"])
+    if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
+        return 403, {"error": "You are banned from using this bot."}
+    if await is_maintenance() is False and uid != config.OWNER_ID and uid not in SUDOERS:
+        return 503, {"error": "Bot is currently in maintenance mode."}
+
     chat_id = await _parse_target_chat(body.get("chat_id"))
     action = str(body.get("action") or "").strip().lower()
 
-    if not chat_id:
-        return 400, {"error": "Invalid chat_id."}
+    if not chat_id or chat_id >= 0:
+        return 400, {"error": "Valid group chat ID (-100...) is required."}
     is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
     if not is_member or not can_ctrl:
         return 403, {"error": "Admin rights required for this voice chat."}

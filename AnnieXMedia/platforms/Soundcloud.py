@@ -1,53 +1,58 @@
 # Authored By Certified Coders © 2025
 import asyncio
 import re
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Dict, Optional, Tuple
 
 from yt_dlp import YoutubeDL
 
 from AnnieXMedia.utils.downloader import yt_dlp_download
 from AnnieXMedia.utils.formatters import seconds_to_min
-
+from AnnieXMedia.utils.security import is_safe_http_url
 
 _SC_RE = re.compile(r"^https?://(soundcloud\.com|on\.soundcloud\.com)/.+", re.I)
 
 
 class SoundAPI:
-    async def valid(self, link: str) -> bool:
+    async def valid(self, link: Optional[str]) -> bool:
         return bool(link and _SC_RE.match(link))
 
     async def _extract_info(self, url: str) -> Dict[str, Any]:
+        if not await self.valid(url) or not await is_safe_http_url(url):
+            return {}
+
         def _run(u: str):
             opts = {
                 "quiet": True,
                 "no_warnings": True,
                 "noplaylist": True,
                 "skip_download": True,
+                "socket_timeout": 12,
             }
             with YoutubeDL(opts) as ydl:
                 return ydl.extract_info(u, download=False)
 
-        loop = asyncio.get_running_loop()
-        info = await loop.run_in_executor(None, _run, url)
+        info = await asyncio.wait_for(asyncio.to_thread(_run, url), timeout=20.0)
         if not info:
             return {}
 
         _type = str(info.get("_type", ""))
         if _type in ("url", "url_transparent") and info.get("url"):
-            sub_info = await loop.run_in_executor(None, _run, info["url"])
-            if sub_info:
-                info = sub_info
+            redir = str(info["url"])
+            if await is_safe_http_url(redir):
+                sub_info = await asyncio.wait_for(asyncio.to_thread(_run, redir), timeout=20.0)
+                if sub_info:
+                    info = sub_info
 
         return info or {}
 
-    async def download(self, url: str) -> Union[Tuple[Dict[str, Any], str], bool]:
+    async def download(self, url: str) -> Tuple[Optional[Dict[str, Any]], Optional[str]]:
         try:
             info = await self._extract_info(url)
         except Exception:
-            return False
+            return None, None
 
         if not info or info.get("_type") == "playlist":
-            return False
+            return None, None
 
         title = (info.get("title") or "SoundCloud").strip()
         try:
@@ -64,7 +69,7 @@ class SoundAPI:
 
         out_path: Optional[str] = await yt_dlp_download(url, type="audio", title=title)
         if not out_path:
-            return False
+            return None, None
 
         details = {
             "title": title,

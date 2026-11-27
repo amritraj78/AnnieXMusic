@@ -15,6 +15,7 @@ from yt_dlp import YoutubeDL
 
 from AnnieXMedia.core.dir import CACHE_DIR, DOWNLOAD_DIR
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
+from AnnieXMedia.utils.security import is_safe_http_url, sanitize_ext
 from AnnieXMedia.utils.tuning import CHUNK_SIZE, SEM
 from config import API_KEY, API_URL, VIDEO_API_URL
 from AnnieXMedia.logging import LOGGER
@@ -41,14 +42,13 @@ def extract_video_id(link: str) -> str:
     if YOUTUBE_ID_RE.match(s):
         return s
     low = s.lower()
-    if "youtube.com" not in low and "youtu.be" not in low:
+    if not re.match(r"^https?://(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)/", low):
         return ""
     if "v=" in s:
-        return s.split("v=")[-1].split("&")[0]
-    last = s.split("/")[-1].split("?")[0]
-    if YOUTUBE_ID_RE.match(last):
-        return last
-    return ""
+        cand = s.split("v=", 1)[1].split("&", 1)[0].split("#", 1)[0]
+        return cand if YOUTUBE_ID_RE.match(cand) else ""
+    last = s.split("/")[-1].split("?", 1)[0].split("#", 1)[0]
+    return last if YOUTUBE_ID_RE.match(last) else ""
 
 
 def get_cookie_file() -> Optional[str]:
@@ -111,20 +111,34 @@ async def close_http_session() -> None:
 
 
 async def download_file(url: str, out_path: str) -> Optional[str]:
-    if not url:
+    if not url or not await is_safe_http_url(url):
         return None
+    os.makedirs(os.path.dirname(out_path) or DOWNLOAD_DIR, exist_ok=True)
+    part_path = f"{out_path}.part"
     try:
         session = await get_http_session()
-        async with session.get(url) as resp:
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=120)) as resp:
             if resp.status != 200:
                 return None
-            async with aiofiles.open(out_path, "wb") as f:
+            total = 0
+            async with aiofiles.open(part_path, "wb") as f:
                 async for chunk in resp.content.iter_chunked(CHUNK_SIZE):
                     if not chunk:
                         break
+                    total += len(chunk)
+                    if total > 512 * 1024 * 1024:
+                        raise ValueError("Remote media exceeded 512MB limit")
                     await f.write(chunk)
+        if total < 4096:
+            with contextlib.suppress(OSError):
+                os.remove(part_path)
+            return None
+        os.replace(part_path, out_path)
         return out_path if os.path.exists(out_path) else None
     except Exception:
+        with contextlib.suppress(OSError):
+            if os.path.exists(part_path):
+                os.remove(part_path)
         return None
 
 
@@ -140,7 +154,7 @@ async def api_download_audio(link: str) -> Optional[str]:
         retries = 0
         while retries < 45:
             retries += 1
-            async with session.get(poll_url) as r:
+            async with session.get(poll_url, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 if r.status != 200:
                     return None
                 try:
@@ -154,7 +168,11 @@ async def api_download_audio(link: str) -> Optional[str]:
                 if status != "done":
                     return None
                 dl_url = data.get("link")
-                fmt = data.get("format", "webm")
+                fmt = sanitize_ext(
+                    f"x.{data.get('format', 'webm')}",
+                    allowed=("mp3", "m4a", "webm", "ogg", "opus", "mp4"),
+                    default="webm",
+                )
                 out_path = f"{DOWNLOAD_DIR}/{vid}.{fmt}"
                 return await download_file(dl_url, out_path)
         return None
@@ -174,7 +192,7 @@ async def api_download_video(link: str) -> Optional[str]:
         retries = 0
         while retries < 45:
             retries += 1
-            async with session.get(poll_url) as r:
+            async with session.get(poll_url, timeout=aiohttp.ClientTimeout(total=15)) as r:
                 if r.status != 200:
                     return None
                 try:
@@ -188,7 +206,11 @@ async def api_download_video(link: str) -> Optional[str]:
                 if status != "done":
                     return None
                 dl_url = data.get("link")
-                fmt = data.get("format", "mp4")
+                fmt = sanitize_ext(
+                    f"x.{data.get('format', 'mp4')}",
+                    allowed=("mp4", "mkv", "webm"),
+                    default="mp4",
+                )
                 out_path = f"{DOWNLOAD_DIR}/{vid}.{fmt}"
                 return await download_file(dl_url, out_path)
         return None
@@ -725,9 +747,7 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
             return path, source_label
 
     loop = asyncio.get_running_loop()
-    sc_path = await run_with_semaphore(
-        loop.run_in_executor(None, _soundcloud_fallback_sync, vid, queries, title)
-    )
+    sc_path = await run_sync_with_semaphore(_soundcloud_fallback_sync, vid, queries, title)
     if sc_path:
         return sc_path, "SoundCloud-Search"
 
@@ -737,9 +757,7 @@ async def _fallback_download_audio(vid: str, title: str) -> Optional[Tuple[str, 
             if path := await downloader(vid, cand):
                 return path, source_label
 
-    dm_path = await run_with_semaphore(
-        loop.run_in_executor(None, _dailymotion_fallback_sync, vid, queries, title, "audio")
-    )
+    dm_path = await run_sync_with_semaphore(_dailymotion_fallback_sync, vid, queries, title, "audio")
     if dm_path:
         return dm_path, "Dailymotion-Audio"
 
@@ -780,12 +798,17 @@ async def run_with_semaphore(coro):
         return await coro
 
 
+async def run_sync_with_semaphore(func, *args):
+    async with SEM:
+        return await asyncio.to_thread(func, *args)
+
+
 async def deduplicate_download(key: str, runner):
     async with _inflight_lock:
         if fut := _inflight.get(key):
             try:
                 return await fut
-            except Exception:
+            except BaseException:
                 return None
         fut = asyncio.get_running_loop().create_future()
         _inflight[key] = fut
@@ -794,7 +817,7 @@ async def deduplicate_download(key: str, runner):
         if not fut.done():
             fut.set_result(result)
         return result
-    except Exception:
+    except BaseException:
         if not fut.done():
             fut.set_result(None)
         return None
@@ -840,11 +863,8 @@ async def _download_with_fallback(
     title: str,
     api_coro,
 ) -> Optional[str]:
-    loop = asyncio.get_running_loop()
     ytdlp_task = asyncio.create_task(
-        run_with_semaphore(
-            loop.run_in_executor(None, download_with_ytdlp_sync, link, fmt)
-        )
+        run_sync_with_semaphore(download_with_ytdlp_sync, link, fmt)
     )
     api_task = asyncio.create_task(api_coro) if api_coro is not None else None
     if api_task:
@@ -867,9 +887,7 @@ async def _download_with_fallback(
         elif media_type == "video":
             queries = _build_search_queries(title)
             if queries:
-                dm_path = await run_with_semaphore(
-                    loop.run_in_executor(None, _dailymotion_fallback_sync, vid, queries, title, "video")
-                )
+                dm_path = await run_sync_with_semaphore(_dailymotion_fallback_sync, vid, queries, title, "video")
                 if dm_path:
                     log_download_source(title, "Dailymotion-Search")
                     return dm_path

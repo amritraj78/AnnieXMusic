@@ -1,15 +1,16 @@
 # Authored By Certified Coders © 2025
+import asyncio
+import html
+import ipaddress
+import os
+import aiohttp
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, LinkPreviewOptions
 from AnnieXMedia import app
+from AnnieXMedia.utils.downloader import get_http_session
 
-import asyncio
-import httpx
-import ipaddress
-import html
-
-IPINFO_TOKEN = "6274faab58da61"
-IPQUALITYSCORE_API_KEY = "952ztTq41AxoXam43pStVjVNcEjo1ntQ"
+IPINFO_TOKEN = os.getenv("IPINFO_TOKEN", "6274faab58da61")
+IPQUALITYSCORE_API_KEY = os.getenv("IPQUALITYSCORE_API_KEY", "952ztTq41AxoXam43pStVjVNcEjo1ntQ")
 
 # ---------- Helpers ----------
 
@@ -109,24 +110,24 @@ def _build_card(ip: str, info: dict, score: int | None) -> tuple[str, InlineKeyb
 
 # ---------- API Calls (async) ----------
 
-async def fetch_ipinfo(client: httpx.AsyncClient, ip: str) -> dict | None:
+async def fetch_ipinfo(session: aiohttp.ClientSession, ip: str) -> dict | None:
     url = f"https://ipinfo.io/{ip}?token={IPINFO_TOKEN}"
     try:
-        r = await client.get(url, timeout=10)
-        if r.status_code == 200:
-            return r.json()
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=10)) as r:
+            if r.status == 200:
+                return await r.json()
     except Exception:
         pass
     return None
 
-async def fetch_ipqs(client: httpx.AsyncClient, ip: str) -> int | None:
+async def fetch_ipqs(session: aiohttp.ClientSession, ip: str) -> int | None:
     url = f"https://ipqualityscore.com/api/json/ip/{IPQUALITYSCORE_API_KEY}/{ip}"
     try:
-        r = await client.get(url, timeout=12)
-        if r.status_code == 200:
-            data = r.json()
-            fs = data.get("fraud_score")
-            return int(fs) if isinstance(fs, (int, float, str)) and str(fs).isdigit() else None
+        async with session.get(url, timeout=aiohttp.ClientTimeout(total=12)) as r:
+            if r.status == 200:
+                data = await r.json()
+                fs = data.get("fraud_score")
+                return int(fs) if isinstance(fs, (int, float, str)) and str(fs).isdigit() else None
     except Exception:
         pass
     return None
@@ -165,10 +166,11 @@ async def ip_info_and_score(_, message):
 
     wait_msg = await message.reply_text("Analyzing IP… <i>fetching intelligence</i> 🔍")
 
-    async with httpx.AsyncClient(headers={"User-Agent": "AnnieX/IpIntel/1.0"}) as client:
-        ipinfo_task = fetch_ipinfo(client, ip_raw)
-        ipqs_task = fetch_ipqs(client, ip_raw)
-        ipinfo, score = await asyncio.gather(ipinfo_task, ipqs_task)
+    session = await get_http_session()
+    ipinfo, score = await asyncio.gather(
+        fetch_ipinfo(session, ip_raw),
+        fetch_ipqs(session, ip_raw),
+    )
 
     if not ipinfo and score is None:
         await wait_msg.edit_text(

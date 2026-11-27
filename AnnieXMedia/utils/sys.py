@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import time
 
 import psutil
@@ -17,4 +18,4 @@ def _sync_sys_stats():
 
 
 async def bot_sys_stats():
-    return _sync_sys_stats()
+    return await asyncio.to_thread(_sync_sys_stats)

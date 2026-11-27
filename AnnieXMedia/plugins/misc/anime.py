@@ -1,10 +1,12 @@
 # Authored By Certified Coders © 2025
+import html
+import re
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
 from AnnieXMedia import app
-import httpx
-import re
+from AnnieXMedia.utils.downloader import get_http_session
 
 
 async def get_anime_info(anime_name):
@@ -30,14 +32,20 @@ async def get_anime_info(anime_name):
     '''
     variables = {"anime": anime_name}
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            response = await client.post(url, json={'query': query, 'variables': variables})
-            data = response.json()
+        session = await get_http_session()
+        async with session.post(
+            url,
+            json={'query': query, 'variables': variables},
+            timeout=aiohttp.ClientTimeout(total=10),
+        ) as response:
+            if response.status != 200:
+                return None, f"❌ HTTP {response.status} from AniList."
+            data = await response.json()
 
         if 'errors' in data:
-            return None, f"❌ Error: {data['errors'][0]['message']}"
+            return None, f"❌ Error: {data['errors'][0].get('message', 'Unknown error')}"
 
-        return data.get('data', {}).get('Media'), None
+        return (data.get('data') or {}).get('Media'), None
     except Exception as e:
         return None, f"❌ Error: {e}"
 
@@ -47,7 +55,8 @@ def clean_description(desc):
         return "No description available."
     desc = re.sub(r"<br\s*/?>", "\n", desc)
     desc = re.sub(r"<[^>]+>", "", desc)
-    return desc.strip()[:800] + "..." if len(desc) > 800 else desc
+    desc = desc.strip()
+    return desc[:750] + "..." if len(desc) > 750 else desc
 
 
 @app.on_message(filters.command("anime"))
@@ -66,35 +75,39 @@ async def anime_info(client: Client, message: Message):
             error or "❌ Anime not found.",
         )
 
-    title = result['title']['romaji']
-    english = result['title'].get('english')
-    native = result['title']['native']
-    episodes = result.get('episodes', 'N/A')
-    status = result.get('status', 'N/A')
-    score = result.get('averageScore', 'N/A')
-    desc = clean_description(result.get('description'))
-    image = result['coverImage']['large']
+    title_obj = result.get('title') or {}
+    title = html.escape(str(title_obj.get('romaji') or title_obj.get('english') or 'Unknown'))
+    english = title_obj.get('english')
+    native = html.escape(str(title_obj.get('native') or 'N/A'))
+    episodes = html.escape(str(result.get('episodes') or 'N/A'))
+    status = html.escape(str(result.get('status') or 'N/A'))
+    score = html.escape(str(result.get('averageScore') or 'N/A'))
+    desc = html.escape(clean_description(result.get('description')))
+    image = (result.get('coverImage') or {}).get('large')
 
-    english_line = f"**🇺🇸 Title (English):** {english}\n" if english else ""
+    english_line = f"<b>🇺🇸 Title (English):</b> {html.escape(str(english))}\n" if english else ""
 
     caption = (
-        f"**🎌 Title (Romaji):** {title}\n"
+        f"<b>🎌 Title (Romaji):</b> {title}\n"
         f"{english_line}"
-        f"**🈶 Title (Native):** {native}\n"
-        f"**📺 Episodes:** {episodes}\n"
-        f"**📊 Score:** {score}/100\n"
-        f"**📌 Status:** {status}\n\n"
-        f"**📝 Description:**\n{desc}"
+        f"<b>🈶 Title (Native):</b> {native}\n"
+        f"<b>📺 Episodes:</b> {episodes}\n"
+        f"<b>📊 Score:</b> {score}/100\n"
+        f"<b>📌 Status:</b> {status}\n\n"
+        f"<b>📝 Description:</b>\n{desc}"
     )
 
-    try:
-        await message.reply_photo(
-            image,
-            caption=caption,
-            parse_mode=ParseMode.MARKDOWN
-        )
-    except Exception:
-        await message.reply_text(
-            caption,
-            parse_mode=ParseMode.MARKDOWN
-        )
+    if image:
+        try:
+            await message.reply_photo(
+                image,
+                caption=caption[:1024],
+                parse_mode=ParseMode.HTML
+            )
+            return
+        except Exception:
+            pass
+    await message.reply_text(
+        caption[:4096],
+        parse_mode=ParseMode.HTML
+    )

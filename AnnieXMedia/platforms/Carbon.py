@@ -1,15 +1,19 @@
 # Authored By Certified Coders © 2025
-import random
 import asyncio
+import random
 import time
 from pathlib import Path
-from typing import Optional
 
 import aiohttp
 from aiohttp import client_exceptions
 
+from AnnieXMedia.utils.downloader import get_http_session
+from AnnieXMedia.utils.security import safe_path_under, sanitize_id_token
+
+
 class UnableToFetchCarbon(Exception):
     pass
+
 
 themes = [
     "3024-night", "a11y-dark", "blackboard", "base16-dark", "base16-light",
@@ -26,6 +30,9 @@ colour = [
     "#008080", "#4B0082", "#EE82EE", "#FFC0CB", "#000000", "#FFFFFF", "#808080",
 ]
 
+_MAX_IMAGE_BYTES = 10 * 1024 * 1024
+
+
 class CarbonAPI:
     def __init__(self, cache_dir: str = "cache", timeout_s: int = 20):
         self.language = "auto"
@@ -38,24 +45,11 @@ class CarbonAPI:
 
         self.cache_dir = Path(cache_dir)
         self.cache_dir.mkdir(parents=True, exist_ok=True)
-
         self._timeout = aiohttp.ClientTimeout(total=timeout_s)
-        self._session: Optional[aiohttp.ClientSession] = None
-
-    async def _session_get(self) -> aiohttp.ClientSession:
-        if self._session is None or self._session.closed:
-            self._session = aiohttp.ClientSession(
-                timeout=self._timeout,
-                headers={
-                    "Content-Type": "application/json",
-                    "User-Agent": "AnnieXMusic/CarbonClient",
-                },
-            )
-        return self._session
 
     async def close(self):
-        if self._session and not self._session.closed:
-            await self._session.close()
+        # Shared session is managed by downloader.close_http_session()
+        return
 
     async def generate(self, text: str, user_id) -> str:
         if not text:
@@ -77,22 +71,34 @@ class CarbonAPI:
         }
 
         url = "https://carbonara.solopov.dev/api/cook"
-        session = await self._session_get()
-
+        session = await get_http_session()
+        safe_uid = sanitize_id_token(str(user_id), "user")
+        out = safe_path_under(self.cache_dir, f"carbon_{safe_uid}_{int(time.time() * 1000)}.jpg")
+        if out is None:
+            raise UnableToFetchCarbon("Invalid cache destination.")
 
         last_exc = None
         for _ in range(2):
             try:
-                async with session.post(url, json=params) as resp:
+                async with session.post(
+                    url,
+                    json=params,
+                    timeout=self._timeout,
+                    headers={"Content-Type": "application/json", "User-Agent": "AnnieXMusic/CarbonClient"},
+                ) as resp:
                     if resp.status != 200:
                         body = await resp.text()
                         raise UnableToFetchCarbon(f"Carbon API error {resp.status}: {body[:200]}")
-                    data = await resp.read()
-
-                    filename = f"carbon_{user_id}_{int(time.time()*1000)}.jpg"
-                    out = self.cache_dir / filename
-                    out.write_bytes(data)
-                    return str(out.resolve())
+                    chunks = []
+                    total = 0
+                    async for chunk in resp.content.iter_chunked(65536):
+                        total += len(chunk)
+                        if total > _MAX_IMAGE_BYTES:
+                            raise UnableToFetchCarbon("Carbon image exceeded safety size limit.")
+                        chunks.append(chunk)
+                    data = b"".join(chunks)
+                    await asyncio.to_thread(out.write_bytes, data)
+                    return str(out)
             except (client_exceptions.ClientError, asyncio.TimeoutError, OSError) as e:
                 last_exc = e
         raise UnableToFetchCarbon(f"Network error: {last_exc!r}")

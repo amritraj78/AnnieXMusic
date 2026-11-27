@@ -1,13 +1,30 @@
 # Authored By Certified Coders © 2025
-import os
 import asyncio
+import os
 from pyrogram import filters
 from pyrogram.types import Message
-from pydub import AudioSegment
 from AnnieXMedia import app
 
 MAX_SIZE_MB = 50
 MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
+
+
+async def _run_ffmpeg(*args: str, timeout: float = 60.0) -> tuple[bool, bool]:
+    proc = await asyncio.create_subprocess_exec(
+        "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", *args,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.PIPE,
+    )
+    try:
+        await asyncio.wait_for(proc.communicate(), timeout=timeout)
+    except asyncio.TimeoutError:
+        try:
+            proc.kill()
+            await proc.wait()
+        except Exception:
+            pass
+        return False, True
+    return proc.returncode == 0, False
 
 
 @app.on_message(filters.command("extract") & filters.reply)
@@ -44,33 +61,30 @@ async def extract_media(_, message: Message):
             return await processing_msg.edit_text("❌ Failed to download video file.")
 
         if command == "audio":
-            def process_audio():
-                audio = AudioSegment.from_file(actual_input)
-                audio = audio.set_channels(1)
-                audio.export(output_audio, format="mp3")
-
-            await asyncio.to_thread(process_audio)
-            await app.send_audio(message.chat.id, output_audio, caption="🎧 Audio extracted.")
+            ok, timed_out = await _run_ffmpeg(
+                "-i", actual_input, "-vn", "-ac", "1", "-c:a", "libmp3lame", "-b:a", "192k", output_audio
+            )
+            if timed_out:
+                return await processing_msg.edit_text("❌ FFmpeg processing timed out.")
+            if ok and os.path.exists(output_audio):
+                await app.send_audio(message.chat.id, output_audio, caption="🎧 Audio extracted.")
+            else:
+                return await processing_msg.edit_text("❌ Failed to extract audio from this video.")
 
         elif command == "video":
-            proc = await asyncio.create_subprocess_exec(
-                "ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", actual_input, "-c", "copy", "-an", output_video,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
+            ok, timed_out = await _run_ffmpeg(
+                "-i", actual_input, "-c", "copy", "-an", output_video
             )
-            try:
-                await asyncio.wait_for(proc.communicate(), timeout=60.0)
-            except asyncio.TimeoutError:
-                proc.kill()
-                await proc.communicate()
+            if timed_out:
                 return await processing_msg.edit_text("❌ FFmpeg processing timed out.")
-            if proc.returncode == 0 and os.path.exists(output_video):
+            if ok and os.path.exists(output_video):
                 await app.send_video(message.chat.id, output_video, caption="🎞️ Video with no audio.")
             else:
                 return await processing_msg.edit_text("❌ FFmpeg processing failed.")
 
     except Exception as e:
-        await message.reply_text(f"❌ Error: {e}")
+        safe_err = str(e).replace("`", "'")
+        await message.reply_text(f"❌ Error: `{safe_err}`")
 
     finally:
         try:
@@ -80,6 +94,6 @@ async def extract_media(_, message: Message):
         for path in (downloaded, file_path, output_audio, output_video):
             if path and os.path.exists(path):
                 try:
-                    os.remove(path)
+                    await asyncio.to_thread(os.remove, path)
                 except Exception:
                     pass

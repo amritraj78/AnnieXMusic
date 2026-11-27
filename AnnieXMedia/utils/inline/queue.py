@@ -11,11 +11,15 @@ def queue_markup(
     played: Union[bool, int] = None,
     dur: Union[bool, int] = None,
 ):
+    safe_vid = str(videoid)
+    if len(safe_vid.encode("utf-8", errors="ignore")) > 40 or "://" in safe_vid:
+        safe_vid = "index"
+
     not_dur = [
         [
             InlineKeyboardButton(
                 text=_["QU_B_1"],
-                callback_data=f"GetQueued {CPLAY}|{videoid}",
+                callback_data=f"GetQueued {CPLAY}|{safe_vid}",
             ),
             InlineKeyboardButton(
                 text=_["CLOSE_BUTTON"],
@@ -23,7 +27,7 @@ def queue_markup(
             ),
         ]
     ]
-    dur = [
+    with_dur = [
         [
             InlineKeyboardButton(
                 text=_["QU_B_2"].format(played, dur),
@@ -33,7 +37,7 @@ def queue_markup(
         [
             InlineKeyboardButton(
                 text=_["QU_B_1"],
-                callback_data=f"GetQueued {CPLAY}|{videoid}",
+                callback_data=f"GetQueued {CPLAY}|{safe_vid}",
             ),
             InlineKeyboardButton(
                 text=_["CLOSE_BUTTON"],
@@ -41,12 +45,11 @@ def queue_markup(
             ),
         ],
     ]
-    upl = InlineKeyboardMarkup(not_dur if DURATION == "Unknown" else dur)
-    return upl
+    return InlineKeyboardMarkup(not_dur if DURATION == "Unknown" else with_dur)
 
 
 def queue_back_markup(_, CPLAY):
-    upl = InlineKeyboardMarkup(
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton(
@@ -60,11 +63,10 @@ def queue_back_markup(_, CPLAY):
             ]
         ]
     )
-    return upl
 
 
 def aq_markup(_, chat_id):
-    buttons = [
+    return [
         [
             InlineKeyboardButton(text="▷", callback_data=f"stream_admin Resume|{chat_id}"),
             InlineKeyboardButton(text="II", callback_data=f"stream_admin Pause|{chat_id}"),
@@ -73,4 +75,3 @@ def aq_markup(_, chat_id):
         ],
         [InlineKeyboardButton(text=_["CLOSE_BUTTON"], callback_data="close")],
     ]
-    return buttons

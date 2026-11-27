@@ -1,5 +1,6 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 from pyrogram import Client, filters
 from pyrogram.enums import ChatMemberStatus
 from pyrogram.errors import UserNotParticipant, FloodWait
@@ -8,23 +9,17 @@ from pyrogram.types import Message
 from AnnieXMedia import app
 from AnnieXMedia.utils.admin_filters import admin_filter
 
-spam_chats = set()
+spam_chats: set[int] = set()
+_utag_tasks: dict[int, asyncio.Task] = {}
 
 
-@app.on_message(filters.command(["utag", "all", "mention"]) & filters.group & admin_filter)
-async def tag_all_users(client: Client, message: Message):
-    replied = message.reply_to_message
-    text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
-
-    if not replied and not text:
-        return await message.reply("**ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴏʀ ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ.**")
-
-    spam_chats.add(message.chat.id)
+async def _run_utag(client: Client, message: Message, replied, text: str):
+    chat_id = message.chat.id
     usernum, usertxt, total_tagged = 0, "", 0
 
     try:
-        async for member in client.get_chat_members(message.chat.id):
-            if message.chat.id not in spam_chats:
+        async for member in client.get_chat_members(chat_id):
+            if chat_id not in spam_chats:
                 break
 
             if not member.user or member.user.is_bot:
@@ -32,38 +27,60 @@ async def tag_all_users(client: Client, message: Message):
 
             usernum += 1
             total_tagged += 1
-            usertxt += f"⊚ [{member.user.first_name}](tg://user?id={member.user.id})\n"
+            safe_name = html.escape((member.user.first_name or "User").replace("[", "").replace("]", ""))
+            usertxt += f"⊚ [{safe_name}](tg://user?id={member.user.id})\n"
 
             if usernum == 5:
                 try:
-                    if replied:
-                        await replied.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
-                    else:
-                        await message.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
+                    target = replied or message
+                    await target.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
                 except FloodWait as e:
-                    await asyncio.sleep(e.value)
+                    await asyncio.sleep(min(int(e.value), 60))
+                except asyncio.CancelledError:
+                    raise
                 except Exception:
                     pass
 
                 await asyncio.sleep(3)
                 usernum, usertxt = 0, ""
 
-        if usertxt:
+        if usertxt and chat_id in spam_chats:
             try:
-                if replied:
-                    await replied.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
-                else:
-                    await message.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
+                target = replied or message
+                await target.reply_text(f"{text}\n{usertxt}\n📢 ᴛᴀɢɢɪɴɢ {total_tagged} ᴜsᴇʀs ᴅᴏɴᴇ...")
+            except FloodWait as e:
+                await asyncio.sleep(min(int(e.value), 60))
             except Exception:
                 pass
 
-        await message.reply(f"✅ **ᴛᴀɢɢɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ. ᴛᴏᴛᴀʟ:** `{total_tagged}` **ᴜsᴇʀs.**")
-
+        try:
+            await message.reply(f"✅ **ᴛᴀɢɢɪɴɢ ᴄᴏᴍᴘʟᴇᴛᴇᴅ. ᴛᴏᴛᴀʟ:** `{total_tagged}` **ᴜsᴇʀs.**")
+        except Exception:
+            pass
+    except asyncio.CancelledError:
+        pass
     finally:
-        spam_chats.discard(message.chat.id)
+        spam_chats.discard(chat_id)
+        _utag_tasks.pop(chat_id, None)
 
 
-@app.on_message(filters.command(["cancel", "ustop"]))
+@app.on_message(filters.command(["utag", "all", "mention"]) & filters.group & admin_filter)
+async def tag_all_users(client: Client, message: Message):
+    chat_id = message.chat.id
+    if chat_id in spam_chats:
+        return await message.reply("⚠️ **ᴀ ᴛᴀɢɢɪɴɢ sᴇssɪᴏɴ ɪs ᴀʟʀᴇᴀᴅʏ ʀᴜɴɴɪɴɢ. ᴜsᴇ /cancel ᴏʀ /ustop ᴛᴏ sᴛᴏᴘ ɪᴛ.**")
+
+    replied = message.reply_to_message
+    text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
+
+    if not replied and not text:
+        return await message.reply("**ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴏʀ ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ.**")
+
+    spam_chats.add(chat_id)
+    _utag_tasks[chat_id] = asyncio.create_task(_run_utag(client, message, replied, text))
+
+
+@app.on_message(filters.command(["cancel", "ustop"]) & filters.group)
 async def cancel_spam(client: Client, message: Message):
     chat_id = message.chat.id
 
@@ -71,8 +88,11 @@ async def cancel_spam(client: Client, message: Message):
         return await message.reply("**ɪ'ᴍ ɴᴏᴛ ᴛᴀɢɢɪɴɢ ᴀɴʏᴏɴᴇ ʀɪɢʜᴛ ɴᴏᴡ.**")
 
     if not message.from_user:
-        if message.sender_chat:
+        if message.sender_chat and message.sender_chat.id == chat_id:
             spam_chats.discard(chat_id)
+            task = _utag_tasks.get(chat_id)
+            if task and not task.done():
+                task.cancel()
             return await message.reply("**🚫 ᴛᴀɢɢɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ.**")
         return await message.reply("**ᴏɴʟʏ ᴀᴅᴍɪɴs ᴄᴀɴ ᴄᴀɴᴄᴇʟ ᴛᴀɢɢɪɴɢ.**")
 
@@ -86,4 +106,7 @@ async def cancel_spam(client: Client, message: Message):
         return await message.reply("**ᴇʀʀᴏʀ ᴄʜᴇᴄᴋɪɴɢ ᴀᴅᴍɪɴ sᴛᴀᴛᴜs.**")
 
     spam_chats.discard(chat_id)
+    task = _utag_tasks.get(chat_id)
+    if task and not task.done():
+        task.cancel()
     return await message.reply("**🚫 ᴛᴀɢɢɪɴɢ ᴄᴀɴᴄᴇʟʟᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ.**")

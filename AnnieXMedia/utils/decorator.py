@@ -116,9 +116,6 @@ def user_admin(func: Handler) -> Handler:
             return await message.reply_text("Unhide your account to use this command.")
 
         user_id = message.from_user.id
-        if user_id in SUDOERS:
-            return await func(client, message, *a, **kw)
-
         try:
             member = await client.get_chat_member(message.chat.id, user_id)
         except Exception:
@@ -139,8 +136,6 @@ def _user_priv_required(flag: str, friendly: str):
                 return await message.reply_text("Use this command in groups only.")
             if not message.from_user:
                 return await message.reply_text("Unhide your account to use this command.")
-            if message.from_user.id in SUDOERS:
-                return await func(client, message, *a, **kw)
             try:
                 user = await client.get_chat_member(message.chat.id, message.from_user.id)
             except Exception:

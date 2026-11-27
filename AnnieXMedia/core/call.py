@@ -62,6 +62,7 @@ async def _clear_(chat_id: int) -> None:
     if popped:
         await auto_clean(popped)
     db[chat_id] = []
+    autoend.pop(chat_id, None)
     await remove_active_video_chat(chat_id)
     await remove_active_chat(chat_id)
     await set_loop(chat_id, 0)
@@ -94,6 +95,36 @@ class Call:
         self.five = PyTgCalls(self.userbot5, workers=4) if self.userbot5 else None
 
         self.active_calls: set[int] = set()
+        self._locks: dict[int, asyncio.Lock] = {}
+
+    def _lock_for(self, chat_id: int) -> asyncio.Lock:
+        lock = self._locks.get(chat_id)
+        if lock is None:
+            if len(self._locks) > 2048:
+                for k in list(self._locks.keys()):
+                    if not self._locks[k].locked() and k not in self.active_calls:
+                        self._locks.pop(k, None)
+            lock = asyncio.Lock()
+            self._locks[chat_id] = lock
+        return lock
+
+    async def _abort_failed_track(self, client, chat_id: int, pop_front: bool = True) -> None:
+        check = db.get(chat_id)
+        if pop_front and check:
+            popped = check.pop(0)
+            await auto_clean(popped)
+        if not db.get(chat_id):
+            await _clear_(chat_id)
+            autoend.pop(chat_id, None)
+            if chat_id in self.active_calls:
+                try:
+                    await client.leave_call(chat_id)
+                except Exception:
+                    pass
+                finally:
+                    self.active_calls.discard(chat_id)
+            return
+        asyncio.create_task(self.play(client, chat_id))
 
 
     @capture_internal_err
@@ -118,45 +149,46 @@ class Call:
 
     @capture_internal_err
     async def stop_stream(self, chat_id: int) -> None:
-        assistant = await group_assistant(self, chat_id)
-        await _clear_(chat_id)
-        if chat_id not in self.active_calls:
-            return
-        try:
-            await assistant.leave_call(chat_id)
-        except Exception:
-            pass
-        finally:
-            self.active_calls.discard(chat_id)
-
+        async with self._lock_for(chat_id):
+            assistant = await group_assistant(self, chat_id)
+            await _clear_(chat_id)
+            if chat_id not in self.active_calls:
+                return
+            try:
+                await assistant.leave_call(chat_id)
+            except Exception:
+                pass
+            finally:
+                self.active_calls.discard(chat_id)
 
     @capture_internal_err
     async def force_stop_stream(self, chat_id: int) -> None:
-        assistant = await group_assistant(self, chat_id)
-        try:
-            check = db.get(chat_id)
-            if check:
-                check.pop(0)
-        except (IndexError, KeyError):
-            pass
-        await remove_active_video_chat(chat_id)
-        await remove_active_chat(chat_id)
-        await _clear_(chat_id)
-        if chat_id not in self.active_calls:
-            return
-        try:
-            await assistant.leave_call(chat_id)
-        except Exception:
-            pass
-        finally:
-            self.active_calls.discard(chat_id)
-
+        async with self._lock_for(chat_id):
+            assistant = await group_assistant(self, chat_id)
+            try:
+                check = db.get(chat_id)
+                if check:
+                    popped = check.pop(0)
+                    if popped:
+                        await auto_clean(popped)
+            except (IndexError, KeyError):
+                pass
+            await _clear_(chat_id)
+            if chat_id not in self.active_calls:
+                return
+            try:
+                await assistant.leave_call(chat_id)
+            except Exception:
+                pass
+            finally:
+                self.active_calls.discard(chat_id)
 
     @capture_internal_err
     async def skip_stream(self, chat_id: int, link: str, video: Union[bool, str] = None, image: Union[bool, str] = None) -> None:
-        assistant = await group_assistant(self, chat_id)
-        stream = dynamic_media_stream(path=link, video=bool(video))
-        await assistant.play(chat_id, stream)
+        async with self._lock_for(chat_id):
+            assistant = await group_assistant(self, chat_id)
+            stream = dynamic_media_stream(path=link, video=bool(video))
+            await assistant.play(chat_id, stream)
 
     @capture_internal_err
     async def vc_users(self, chat_id: int) -> list:
@@ -192,10 +224,11 @@ class Call:
         is_video = playing[0].get("streamtype") == "video"
 
         if not os.path.exists(out):
+            part_out = f"{out}.part.{os.getpid()}"
             cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error", "-y", "-i", file_path]
             if is_video:
                 cmd.extend(["-filter:v", f"setpts={1.0 / spd:.4f}*PTS"])
-            cmd.extend(["-filter:a", f"atempo={spd}", out])
+            cmd.extend(["-filter:a", f"atempo={spd}", part_out])
 
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -208,11 +241,16 @@ class Call:
             except asyncio.TimeoutError:
                 proc.kill()
                 await proc.communicate()
+                if os.path.exists(part_out):
+                    os.remove(part_out)
                 raise AssistantErr("Audio speed processing timed out.")
 
-            if proc.returncode != 0 or not os.path.exists(out):
+            if proc.returncode != 0 or not os.path.exists(part_out):
+                if os.path.exists(part_out):
+                    os.remove(part_out)
                 err_txt = stderr.decode("utf-8", errors="ignore")[:200] if stderr else "Unknown ffmpeg error"
                 raise AssistantErr(f"Speed conversion failed: {err_txt}")
+            os.replace(part_out, out)
 
         dur_res = await asyncio.get_running_loop().run_in_executor(None, check_duration, out)
         try:
@@ -252,7 +290,7 @@ class Call:
         finally:
             try:
                 await assistant.leave_call(config.LOGGER_ID)
-            except:
+            except Exception:
                 pass
 
     @capture_internal_err
@@ -264,40 +302,44 @@ class Call:
         video: Union[bool, str] = None,
         image: Union[bool, str] = None,
     ) -> None:
-        assistant = await group_assistant(self, chat_id)
-        lang = await get_lang(chat_id)
-        _ = get_string(lang)
-        stream = dynamic_media_stream(path=link, video=bool(video))
+        async with self._lock_for(chat_id):
+            assistant = await group_assistant(self, chat_id)
+            lang = await get_lang(chat_id)
+            _ = get_string(lang)
+            stream = dynamic_media_stream(path=link, video=bool(video))
 
-        try:
-            await assistant.play(chat_id, stream)
-        except (NoActiveGroupCall, ChatAdminRequired):
-            raise AssistantErr(_["call_8"])
-        except NoAudioSourceFound:
-            raise AssistantErr(_["call_11"])
-        except NoVideoSourceFound:
-            raise AssistantErr(_["call_12"])
-        except (ConnectionNotFound, TelegramServerError):
-            raise AssistantErr(_["call_10"])
-        except Exception as e:
-            raise AssistantErr(
-                f"ᴜɴᴀʙʟᴇ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ ᴄᴀʟʟ.\nRᴇᴀsᴏɴ: {e}"
-            )
-        self.active_calls.add(chat_id)
-        await add_active_chat(chat_id)
-        await music_on(chat_id)
-        if video:
-            await add_active_video_chat(chat_id)
+            try:
+                await assistant.play(chat_id, stream)
+            except (NoActiveGroupCall, ChatAdminRequired):
+                raise AssistantErr(_["call_8"])
+            except NoAudioSourceFound:
+                raise AssistantErr(_["call_11"])
+            except NoVideoSourceFound:
+                raise AssistantErr(_["call_12"])
+            except (ConnectionNotFound, TelegramServerError):
+                raise AssistantErr(_["call_10"])
+            except Exception as e:
+                raise AssistantErr(
+                    f"ᴜɴᴀʙʟᴇ ᴛᴏ ᴊᴏɪɴ ᴛʜᴇ ɢʀᴏᴜᴘ ᴄᴀʟʟ.\nRᴇᴀsᴏɴ: {e}"
+                )
+            self.active_calls.add(chat_id)
+            await add_active_chat(chat_id)
+            await music_on(chat_id)
+            if video:
+                await add_active_video_chat(chat_id)
 
-        if await is_autoend():
-            counter[chat_id] = {}
-            users = len(await assistant.get_participants(chat_id))
-            if users == 1:
-                autoend[chat_id] = datetime.now() + timedelta(minutes=1)
+            if await is_autoend():
+                users = len(await assistant.get_participants(chat_id))
+                if users == 1:
+                    autoend[chat_id] = datetime.now() + timedelta(minutes=1)
 
 
     @capture_internal_err
     async def play(self, client, chat_id: int) -> None:
+        async with self._lock_for(chat_id):
+            await self._play_unlocked(client, chat_id)
+
+    async def _play_unlocked(self, client, chat_id: int) -> None:
         check = db.get(chat_id)
         popped = None
         loop = await get_loop(chat_id)
@@ -365,13 +407,15 @@ class Call:
             if "live_" in queued:
                 n, link = await YouTube.video(videoid, True)
                 if n == 0 or not link:
-                    return await app.send_message(original_chat_id, text=_["call_6"])
+                    await app.send_message(original_chat_id, text=_["call_6"])
+                    return await self._abort_failed_track(client, chat_id)
 
                 stream = dynamic_media_stream(path=link, video=video)
                 try:
                     await client.play(chat_id, stream)
                 except Exception:
-                    return await app.send_message(original_chat_id, text=_["call_6"])
+                    await app.send_message(original_chat_id, text=_["call_6"])
+                    return await self._abort_failed_track(client, chat_id)
 
                 img = await get_thumb(videoid)
                 button = stream_markup(_, chat_id)
@@ -413,19 +457,28 @@ class Call:
                         title=title,
                     )
                 except Exception:
-                    return await mystic.edit_text(
-                        _["call_6"], link_preview_options=LinkPreviewOptions(is_disabled=True)
-                    )
+                    file_path, direct = None, None
                 if not file_path:
-                    return await mystic.edit_text(
-                        _["call_6"], link_preview_options=LinkPreviewOptions(is_disabled=True)
-                    )
+                    try:
+                        await mystic.edit_text(
+                            _["call_6"], link_preview_options=LinkPreviewOptions(is_disabled=True)
+                        )
+                    except Exception:
+                        pass
+                    return await self._abort_failed_track(client, chat_id)
 
                 stream = dynamic_media_stream(path=file_path, video=video)
                 try:
                     await client.play(chat_id, stream)
                 except Exception:
-                    return await mystic.edit_text(_["call_6"])
+                    try:
+                        await mystic.edit_text(_["call_6"])
+                    except Exception:
+                        pass
+                    return await self._abort_failed_track(client, chat_id)
+
+                if direct and chat_id in db and db[chat_id]:
+                    db[chat_id][0]["file"] = file_path
 
                 img = await get_thumb(videoid)
                 button = stream_markup(_, chat_id)
@@ -464,8 +517,9 @@ class Call:
                 stream = dynamic_media_stream(path=videoid, video=video)
                 try:
                     await client.play(chat_id, stream)
-                except:
-                    return await app.send_message(original_chat_id, text=_["call_6"])
+                except Exception:
+                    await app.send_message(original_chat_id, text=_["call_6"])
+                    return await self._abort_failed_track(client, chat_id)
 
                 button = stream_markup(_, chat_id)
                 try:
@@ -489,8 +543,9 @@ class Call:
                 stream = dynamic_media_stream(path=queued, video=video)
                 try:
                     await client.play(chat_id, stream)
-                except:
-                    return await app.send_message(original_chat_id, text=_["call_6"])
+                except Exception:
+                    await app.send_message(original_chat_id, text=_["call_6"])
+                    return await self._abort_failed_track(client, chat_id)
 
                 if videoid == "telegram":
                     button = stream_markup(_, chat_id)
@@ -604,6 +659,14 @@ class Call:
         for client in (self.one, self.two, self.three, self.four, self.five):
             if client:
                 await client.start()
+
+    async def stop(self) -> None:
+        for client in (self.one, self.two, self.three, self.four, self.five):
+            if client:
+                try:
+                    await client.stop()
+                except Exception:
+                    pass
 
     @capture_internal_err
     async def ping(self) -> str:

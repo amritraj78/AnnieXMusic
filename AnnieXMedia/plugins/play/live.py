@@ -14,8 +14,14 @@ from config import AYU, BANNED_USERS
 @languageCB
 @capture_callback_err
 async def play_live_stream(client, CallbackQuery, _):
-    data = CallbackQuery.data.strip().split(None, 1)[1]
-    vidid, user_id, mode, cplay, fplay = data.split("|")
+    if not CallbackQuery.data or not CallbackQuery.message:
+        return
+    parts = CallbackQuery.data.strip().split(None, 1)
+    if len(parts) < 2 or parts[1].count("|") != 4:
+        return
+    vidid, user_id, mode, cplay, fplay = parts[1].split("|")
+    if not user_id.isdigit():
+        return
 
     if not CallbackQuery.from_user or CallbackQuery.from_user.id != int(user_id):
         try:
@@ -27,9 +33,11 @@ async def play_live_stream(client, CallbackQuery, _):
         chat_id, channel = await get_channeplayCB(_, cplay, CallbackQuery)
     except Exception:
         return
+    if not chat_id:
+        return
 
-    is_video = (mode == "v")
-    forceplay = (fplay == "f")
+    is_video = mode == "v"
+    forceplay = fplay == "f"
     user_name = CallbackQuery.from_user.first_name if CallbackQuery.from_user else "User"
 
     try:
@@ -66,9 +74,12 @@ async def play_live_stream(client, CallbackQuery, _):
             )
         except Exception as e:
             ex_type = type(e).__name__
-            err = e if ex_type == "AssistantErr" else _["general_2"].format(ex_type)
+            err = str(e) if ex_type == "AssistantErr" else _["general_2"].format(ex_type)
             return await mystic.edit_text(err)
     else:
         return await mystic.edit_text("» ɴᴏᴛ ᴀ ʟɪᴠᴇ sᴛʀᴇᴀᴍ.")
 
-    await mystic.delete()
+    try:
+        await mystic.delete()
+    except Exception:
+        pass

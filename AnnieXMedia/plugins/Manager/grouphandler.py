@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 from pyrogram import filters
 from pyrogram.enums import ChatType, ChatMemberStatus
 from pyrogram.types import Message, InlineKeyboardMarkup, InlineKeyboardButton
@@ -8,7 +9,14 @@ from AnnieXMedia.utils.admin_filters import admin_filter
 # ------------------- Utility Functions ------------------- #
 
 def is_group(message: Message) -> bool:
-    return message.chat.type not in (ChatType.PRIVATE, ChatType.BOT)
+    return bool(
+        message.chat
+        and message.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP, ChatType.FORUM)
+    )
+
+
+def _safe_err(err: Exception) -> str:
+    return html.escape(str(err).replace("`", "'"))
 
 async def has_permission(message: Message, permission: str) -> bool:
     if message.sender_chat and message.sender_chat.id == message.chat.id:
@@ -28,7 +36,7 @@ def admin_mention(message: Message) -> str:
     if message.from_user:
         return message.from_user.mention
     if message.sender_chat:
-        return message.sender_chat.title
+        return html.escape(message.sender_chat.title or "Admin")
     return "Admin"
 
 def _view_btn(msg: Message):
@@ -52,12 +60,13 @@ async def pin(_, message: Message):
 
     try:
         await message.reply_to_message.pin()
+        chat_title = html.escape(message.chat.title or "Group")
         await message.reply_text(
-            f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {message.chat.title}\n**ᴀᴅᴍɪɴ:** {admin_mention(message)}",
+            f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {chat_title}\n**ᴀᴅᴍɪɴ:** {admin_mention(message)}",
             reply_markup=_view_btn(message.reply_to_message)
         )
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ᴘɪɴ ᴍᴇssᴀɢᴇ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ᴘɪɴ ᴍᴇssᴀɢᴇ:**\n`{_safe_err(e)}`")
 
 # ------------------- Unpin Message ------------------- #
 
@@ -74,12 +83,13 @@ async def unpin(_, message: Message):
 
     try:
         await message.reply_to_message.unpin()
+        chat_title = html.escape(message.chat.title or "Group")
         await message.reply_text(
-            f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴜɴᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {message.chat.title}\n**ᴀᴅᴍɪɴ:** {admin_mention(message)}",
+            f"**sᴜᴄᴄᴇssғᴜʟʟʏ ᴜɴᴘɪɴɴᴇᴅ ᴍᴇssᴀɢᴇ!**\n\n**ᴄʜᴀᴛ:** {chat_title}\n**ᴀᴅᴍɪɴ:** {admin_mention(message)}",
             reply_markup=_view_btn(message.reply_to_message)
         )
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ᴜɴᴘɪɴ ᴍᴇssᴀɢᴇ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ᴜɴᴘɪɴ ᴍᴇssᴀɢᴇ:**\n`{_safe_err(e)}`")
 
 # ------------------- Set / Remove Photo, Title, Description ------------------- #
 
@@ -108,7 +118,7 @@ async def set_photo(_, message: Message):
         await app.set_chat_photo(chat_id=message.chat.id, photo=file_id)
         await message.reply_text(f"**ɢʀᴏᴜᴘ ᴘʜᴏᴛᴏ ᴜᴘᴅᴀᴛᴇᴅ sᴜᴄᴄᴇssғᴜʟʟʏ!**\nʙʏ {admin_mention(message)}")
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴘʜᴏᴛᴏ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴘʜᴏᴛᴏ:**\n`{_safe_err(e)}`")
 
 @app.on_message(filters.command("removephoto") & admin_filter)
 async def remove_photo(_, message: Message):
@@ -120,7 +130,7 @@ async def remove_photo(_, message: Message):
         await app.delete_chat_photo(message.chat.id)
         await message.reply_text(f"**ɢʀᴏᴜᴘ ᴘʜᴏᴛᴏ ʀᴇᴍᴏᴠᴇᴅ!**\nʙʏ {admin_mention(message)}")
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ʀᴇᴍᴏᴠᴇ ᴘʜᴏᴛᴏ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ ʀᴇᴍᴏᴠᴇ ᴘʜᴏᴛᴏ:**\n`{_safe_err(e)}`")
 
 @app.on_message(filters.command("settitle") & admin_filter)
 async def set_title(_, message: Message):
@@ -140,9 +150,9 @@ async def set_title(_, message: Message):
 
     try:
         await message.chat.set_title(title)
-        await message.reply_text(f"**ɢʀᴏᴜᴘ ɴᴀᴍᴇ ᴄʜᴀɴɢᴇᴅ ᴛᴏ:** {title}\nʙʏ {admin_mention(message)}")
+        await message.reply_text(f"**ɢʀᴏᴜᴘ ɴᴀᴍᴇ ᴄʜᴀɴɢᴇᴅ ᴛᴏ:** {html.escape(title)}\nʙʏ {admin_mention(message)}")
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴛɪᴛʟᴇ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴛɪᴛʟᴇ:**\n`{_safe_err(e)}`")
 
 
 @app.on_message(filters.command(["setdescription", "setdiscription"]) & admin_filter)
@@ -165,4 +175,4 @@ async def set_description(_, message: Message):
         await message.chat.set_description(desc)
         await message.reply_text(f"**ɢʀᴏᴜᴘ ᴅᴇsᴄʀɪᴘᴛɪᴏɴ ᴜᴘᴅᴀᴛᴇᴅ!**\nʙʏ {admin_mention(message)}")
     except Exception as e:
-        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴅᴇsᴄʀɪᴘᴛɪᴏɴ:**\n`{e}`")
+        await message.reply_text(f"**ғᴀɪʟᴇᴅ ᴛᴏ sᴇᴛ ᴅᴇsᴄʀɪᴘᴛɪᴏɴ:**\n`{_safe_err(e)}`")

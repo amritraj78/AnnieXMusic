@@ -1,5 +1,6 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 
 from pyrogram import filters
 from pyrogram.errors import FloodWait
@@ -56,10 +57,10 @@ async def global_ban(client, message: Message, _):
             number_of_chats += 1
         except FloodWait as fw:
             await asyncio.sleep(int(fw.value))
-        except:
+        except Exception:
             continue
     await add_banned_user(user.id)
-    chat_title = message.chat.title if message.chat.title else "Private"
+    chat_title = html.escape(message.chat.title if message.chat.title else "Private")
     await message.reply_text(
         _["gban_6"].format(
             app.mention,
@@ -71,7 +72,10 @@ async def global_ban(client, message: Message, _):
             number_of_chats,
         )
     )
-    await mystic.delete()
+    try:
+        await mystic.delete()
+    except Exception:
+        pass
 
 
 @app.on_message(filters.command(["ungban"]) & SUDOERS)
@@ -86,8 +90,7 @@ async def global_un(client, message: Message, _):
     is_gbanned = await is_banned_user(user.id)
     if not is_gbanned:
         return await message.reply_text(_["gban_7"].format(user.mention))
-    if user.id in BANNED_USERS:
-        BANNED_USERS.remove(user.id)
+    BANNED_USERS.discard(user.id)
     served_chats = []
     chats = await get_served_chats()
     for chat in chats:
@@ -101,11 +104,14 @@ async def global_un(client, message: Message, _):
             number_of_chats += 1
         except FloodWait as fw:
             await asyncio.sleep(int(fw.value))
-        except:
+        except Exception:
             continue
     await remove_banned_user(user.id)
     await message.reply_text(_["gban_9"].format(user.mention, number_of_chats))
-    await mystic.delete()
+    try:
+        await mystic.delete()
+    except Exception:
+        pass
 
 
 @app.on_message(filters.command(["gbannedusers", "gbanlist"]) & SUDOERS)

@@ -7,7 +7,9 @@ import aiohttp
 from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from youtubesearchpython.aio import VideosSearch
 from config import YOUTUBE_IMG_URL
-from AnnieXMedia.core.dir import CACHE_DIR 
+from AnnieXMedia.core.dir import CACHE_DIR
+from AnnieXMedia.utils.downloader import get_http_session
+from AnnieXMedia.utils.security import is_safe_http_url, safe_path_under, sanitize_id_token
 
 
 PANEL_W, PANEL_H = 763, 545
@@ -94,12 +96,18 @@ def _process_image(thumb_path: str, cache_path: str, title: str, views: str, is_
 
 
 async def get_thumb(videoid: str) -> str:
-    cache_path = os.path.join(CACHE_DIR, f"{videoid}_v4.png")
+    safe_vid = sanitize_id_token(videoid, "track")
+    cache_p = safe_path_under(CACHE_DIR, f"{safe_vid}_v4.png")
+    thumb_p = safe_path_under(CACHE_DIR, f"thumb_{safe_vid}.png")
+    if cache_p is None or thumb_p is None:
+        return YOUTUBE_IMG_URL
+    cache_path, thumb_path = str(cache_p), str(thumb_p)
+
     if os.path.exists(cache_path):
         return cache_path
 
     # YouTube video data fetch
-    results = VideosSearch(f"https://www.youtube.com/watch?v={videoid}", limit=1)
+    results = VideosSearch(f"https://www.youtube.com/watch?v={safe_vid}", limit=1)
     try:
         results_data = await results.next()
         result_items = results_data.get("result", [])
@@ -116,16 +124,24 @@ async def get_thumb(videoid: str) -> str:
     is_live = not duration or str(duration).strip().lower() in {"", "live", "live now"}
     duration_text = "Live" if is_live else duration or "Unknown Mins"
 
-    # Download thumbnail
-    thumb_path = os.path.join(CACHE_DIR, f"thumb{videoid}.png")
+    if not await is_safe_http_url(thumbnail):
+        thumbnail = YOUTUBE_IMG_URL
+
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.get(thumbnail) as resp:
-                if resp.status == 200:
-                    async with aiofiles.open(thumb_path, "wb") as f:
-                        await f.write(await resp.read())
-                else:
-                    return YOUTUBE_IMG_URL
+        session = await get_http_session()
+        async with session.get(thumbnail, timeout=aiohttp.ClientTimeout(total=15)) as resp:
+            if resp.status == 200:
+                total = 0
+                chunks = []
+                async for chunk in resp.content.iter_chunked(65536):
+                    total += len(chunk)
+                    if total > 10 * 1024 * 1024:
+                        return YOUTUBE_IMG_URL
+                    chunks.append(chunk)
+                async with aiofiles.open(thumb_path, "wb") as f:
+                    await f.write(b"".join(chunks))
+            else:
+                return YOUTUBE_IMG_URL
     except Exception:
         return YOUTUBE_IMG_URL
 

@@ -1,12 +1,19 @@
 # Authored By Certified Coders © 2025
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import LinkPreviewOptions, Message
-import httpx
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
+from AnnieXMedia.utils.downloader import get_http_session
+from AnnieXMedia.utils.security import validate_github_username
 
 
 def chunk_string(text, chunk_size):
     return [text[i:i + chunk_size] for i in range(0, len(text), chunk_size)]
+
+
+def _clean_md(text: str) -> str:
+    return text.replace("[", "(").replace("]", ")").replace("`", "'")
 
 
 @app.on_message(filters.command("allrepo"))
@@ -14,7 +21,9 @@ async def all_repo_command(client: Client, message: Message):
     if len(message.command) < 2:
         return await message.reply_text("❌ Please enter a GitHub username.\n\nExample: `/allrepo amritraj78`")
 
-    username = message.command[1].strip()
+    username = validate_github_username(message.command[1])
+    if not username:
+        return await message.reply_text("❌ Invalid GitHub username format.")
 
     try:
         repo_info = await get_all_repository_info(username)
@@ -28,31 +37,34 @@ async def all_repo_command(client: Client, message: Message):
             await message.reply_text(chunk, link_preview_options=LinkPreviewOptions(is_disabled=True))
 
     except Exception as e:
-        print(f"Error in /allrepo: {e}")
+        LOGGER(__name__).warning(f"Error in /allrepo: {e}")
         await message.reply_text("⚠️ An error occurred while fetching repositories.")
 
 
-async def get_all_repository_info(username: str) -> str:
+async def get_all_repository_info(username: str) -> str | None:
     url = f"https://api.github.com/users/{username}/repos"
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        response = await client.get(url)
-
-    if response.status_code != 200:
-        return None
-
-    try:
-        data = response.json()
-    except Exception:
-        return None
+    session = await get_http_session()
+    async with session.get(
+        url,
+        headers={"Accept": "application/vnd.github+json", "User-Agent": "AnnieXMusic"},
+        timeout=aiohttp.ClientTimeout(total=10),
+    ) as response:
+        if response.status != 200:
+            return None
+        try:
+            data = await response.json()
+        except Exception:
+            return None
 
     if not isinstance(data, list) or not data:
         return None
 
     info_lines = [
-        f"🖇 **[{repo['name']}]({repo['html_url']})**\n"
-        f"⭐ Stars: `{repo['stargazers_count']}` | 🍴 Forks: `{repo['forks_count']}`\n"
-        f"📄 {repo['description'] or 'No description'}"
-        for repo in data
+        f"🖇 **[{_clean_md(str(repo.get('name', 'repo')))}]({repo.get('html_url', '')})**\n"
+        f"⭐ Stars: `{repo.get('stargazers_count', 0)}` | 🍴 Forks: `{repo.get('forks_count', 0)}`\n"
+        f"📄 {_clean_md(str(repo.get('description') or 'No description'))}"
+        for repo in data[:100]
+        if isinstance(repo, dict)
     ]
 
     profile_link = f"👤 [View GitHub Profile](https://github.com/{username})"

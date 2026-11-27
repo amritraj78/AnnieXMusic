@@ -2,11 +2,13 @@
 import asyncio
 import shlex
 from typing import Tuple
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError
 
 import config
+from AnnieXMedia.utils.security import redact_secrets
 
 from ..logging import LOGGER
 
@@ -27,48 +29,62 @@ def install_req(cmd: str) -> Tuple[str, str, int, int]:
             process.pid,
         )
 
-    return asyncio.get_event_loop().run_until_complete(install_requirements())
+    return asyncio.run(install_requirements())
+
+
+def _build_authenticated_url(repo_url: str, token: str) -> str:
+    """Build an authenticated HTTPS clone/fetch URL for any Git host without assuming .com."""
+    parts = urlsplit((repo_url or "").strip())
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return repo_url
+    host = parts.netloc.split("@")[-1]
+    owner_hint = (parts.path.strip("/").split("/") or ["git"])[0] or "git"
+    cred = f"{quote(owner_hint, safe='')}:{quote(token, safe='')}"
+    return urlunsplit((parts.scheme, f"{cred}@{host}", parts.path, parts.query, parts.fragment))
 
 
 def git():
-    REPO_LINK = config.UPSTREAM_REPO
-    if config.GIT_TOKEN:
-        GIT_USERNAME = REPO_LINK.split("com/")[1].split("/")[0]
-        TEMP_REPO = REPO_LINK.split("https://")[1]
-        UPSTREAM_REPO = f"https://{GIT_USERNAME}:{config.GIT_TOKEN}@{TEMP_REPO}"
-    else:
-        UPSTREAM_REPO = config.UPSTREAM_REPO
+    clean_repo = (config.UPSTREAM_REPO or "").strip()
+    auth_repo = (
+        _build_authenticated_url(clean_repo, config.GIT_TOKEN)
+        if config.GIT_TOKEN and clean_repo
+        else clean_repo
+    )
     try:
-        repo = Repo()
-        LOGGER(__name__).info(f"Git Client Found [VPS DEPLOYER]")
+        Repo()
+        LOGGER(__name__).info("Git Client Found [VPS DEPLOYER]")
     except GitCommandError:
-        LOGGER(__name__).info(f"Invalid Git Command")
+        LOGGER(__name__).info("Invalid Git Command")
     except InvalidGitRepositoryError:
         try:
             repo = Repo.init()
-            if "origin" in repo.remotes:
-                origin = repo.remote("origin")
-            else:
-                origin = repo.create_remote("origin", UPSTREAM_REPO)
-            origin.fetch()
-            repo.create_head(
-                config.UPSTREAM_BRANCH,
-                origin.refs[config.UPSTREAM_BRANCH],
+            origin = (
+                repo.remote("origin")
+                if "origin" in repo.remotes
+                else repo.create_remote("origin", auth_repo)
             )
-            repo.heads[config.UPSTREAM_BRANCH].set_tracking_branch(
-                origin.refs[config.UPSTREAM_BRANCH]
-            )
-            repo.heads[config.UPSTREAM_BRANCH].checkout(True)
             try:
-                repo.create_remote("origin", config.UPSTREAM_REPO)
-            except BaseException:
-                pass
-            nrs = repo.remote("origin")
-            nrs.fetch(config.UPSTREAM_BRANCH)
-            try:
-                nrs.pull(config.UPSTREAM_BRANCH)
-            except GitCommandError:
-                repo.git.reset("--hard", "FETCH_HEAD")
-            LOGGER(__name__).info(f"Fetching updates from upstream repository...")
+                origin.set_url(auth_repo)
+                origin.fetch()
+                if config.UPSTREAM_BRANCH not in repo.heads:
+                    repo.create_head(
+                        config.UPSTREAM_BRANCH,
+                        origin.refs[config.UPSTREAM_BRANCH],
+                    )
+                repo.heads[config.UPSTREAM_BRANCH].set_tracking_branch(
+                    origin.refs[config.UPSTREAM_BRANCH]
+                )
+                repo.heads[config.UPSTREAM_BRANCH].checkout(True)
+                try:
+                    origin.pull(config.UPSTREAM_BRANCH)
+                except GitCommandError:
+                    repo.git.reset("--hard", "FETCH_HEAD")
+            finally:
+                # Always strip credentials from .git/config once sync finishes
+                try:
+                    origin.set_url(clean_repo)
+                except Exception:
+                    pass
+            LOGGER(__name__).info("Fetching updates from upstream repository...")
         except Exception as e:
-            LOGGER(__name__).warning(f"Git auto-sync skipped: {e}")
+            LOGGER(__name__).warning(f"Git auto-sync skipped: {redact_secrets(str(e))}")

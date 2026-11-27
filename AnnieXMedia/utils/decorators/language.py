@@ -17,13 +17,13 @@ def language(mystic):
                 )
         try:
             await message.delete()
-        except:
+        except Exception:
             pass
 
         try:
             language = await get_lang(message.chat.id)
             language = get_string(language)
-        except:
+        except Exception:
             language = get_string("en")
         return await mystic(_, message, language)
 

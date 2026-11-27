@@ -14,16 +14,17 @@ from pyrogram.types import (
 )
 
 from AnnieXMedia import app
+from AnnieXMedia.misc import SUDOERS
 from AnnieXMedia.utils.admin_check import is_admin
 
 chatQueue: set[int] = set()
 stopProcess: dict[int, bool] = {}
 
 def _in_group(msg: Message) -> bool:
-    return msg.chat and msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP)
+    return bool(msg.chat and msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP, ChatType.FORUM))
 
 def _in_channel(msg: Message) -> bool:
-    return msg.chat and msg.chat.type == ChatType.CHANNEL
+    return bool(msg.chat and msg.chat.type == ChatType.CHANNEL)
 
 def _mention_html(user) -> str:
     name = html.escape((user.first_name or "User").strip())
@@ -32,7 +33,18 @@ def _mention_html(user) -> str:
 async def _bot_is_admin(chat_id: int) -> bool:
     try:
         me = await app.get_chat_member(chat_id, "self")
-        return me.status == ChatMemberStatus.ADMINISTRATOR
+        return me.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
+    except (UserNotParticipant, RPCError):
+        return False
+
+async def _user_is_target_admin(chat_id: int, user_id: int) -> bool:
+    if not user_id:
+        return False
+    if user_id in SUDOERS:
+        return True
+    try:
+        member = await app.get_chat_member(chat_id, user_id)
+        return member.status in (ChatMemberStatus.ADMINISTRATOR, ChatMemberStatus.OWNER)
     except (UserNotParticipant, RPCError):
         return False
 
@@ -62,7 +74,7 @@ async def get_channel_stats(chat_id: int):
         chat = await app.get_chat(chat_id)
         members_count = chat.members_count or 0
         return chat, members_count
-    except:
+    except Exception:
         return None, 0
 
 async def safe_edit(msg: Message, text: str, reply_markup=None):
@@ -133,6 +145,13 @@ async def zombie_channel_scan(_: Client, message: Message, channel_id: int, user
             parse_mode=enums.ParseMode.HTML
         )
 
+    if not await _user_is_target_admin(channel_id, user_id):
+        return await status_msg.edit_text(
+            "<i>Access Denied</i>\n\n"
+            "<b>Only admins of that chat/channel can scan or clean members.</b>",
+            parse_mode=enums.ParseMode.HTML
+        )
+
     if not await _bot_is_admin(channel_id):
         return await status_msg.edit_text(
             "<i>Access Denied</i>\n\n"
@@ -147,7 +166,7 @@ async def zombie_channel_scan(_: Client, message: Message, channel_id: int, user
 
     await status_msg.edit_text(
         f"<b>Access</b>\n"
-        f"<b>Channel:</b> {html.escape(chat.title)}\n"
+        f"<b>Channel:</b> {html.escape(chat.title or 'Chat')}\n"
         f"<b>Members:</b> <code>{members_count}</code>\n"
         f"<b>Bots:</b> <code>{len(bots)}</code>\n"
         f"<b>Zombies:</b> <code>{len(zombies)}</code>",
@@ -191,11 +210,14 @@ async def clean_zombies_channel(_: Client, cq: CallbackQuery):
         _, chat_id_str, user_id_str = cq.data.split(":")
         chat_id = int(chat_id_str)
         user_id = int(user_id_str)
-    except:
+    except Exception:
         return await cq.answer("Invalid data.", show_alert=True)
 
     if not cq.from_user or cq.from_user.id != user_id:
         return await cq.answer("This panel is not for you.", show_alert=True)
+
+    if not await _user_is_target_admin(chat_id, cq.from_user.id):
+        return await cq.answer("Only admins of that channel/chat can run this.", show_alert=True)
 
     if not await _bot_is_admin(chat_id):
         return await cq.answer("I no longer have admin rights.", show_alert=True)
@@ -205,20 +227,25 @@ async def clean_zombies_channel(_: Client, cq: CallbackQuery):
 
     chatQueue.add(chat_id)
     stopProcess[chat_id] = False
+    try:
+        zombies = await scan_deleted_members(chat_id)
+    except Exception:
+        chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
+        return await cq.answer("Failed to scan members.", show_alert=True)
 
-    zombies = await scan_deleted_members(chat_id)
     total = len(zombies)
-
     if total == 0:
         chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
         return await cq.answer("No zombies to remove.", show_alert=True)
 
+    await cq.answer()
     status = await cq.edit_message_text(
         f"<i>Removing {total} zombies...</i>",
         parse_mode=enums.ParseMode.HTML
     )
 
-    removed = 0
     async def ban_user(uid: int) -> bool:
         max_retries = 3
         for attempt in range(max_retries):
@@ -228,31 +255,34 @@ async def clean_zombies_channel(_: Client, cq: CallbackQuery):
             except FloodWait as e:
                 if attempt == max_retries - 1:
                     return False
-                await asyncio.sleep(e.value)
-            except:
+                await asyncio.sleep(min(int(e.value), 60))
+            except Exception:
                 return False
         return False
 
-    tasks = [ban_user(u.id) for u in zombies]
-    batch_size = 15
-    for i in range(0, len(tasks), batch_size):
-        if stopProcess.get(chat_id, False):
-            break
-        results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
-        removed += sum(1 for r in results if r is True)
-        await safe_edit(status, f"<i>Removed {removed}/{total} zombies...</i>")
+    async def _worker():
+        removed = 0
+        try:
+            tasks = [ban_user(u.id) for u in zombies]
+            batch_size = 15
+            for i in range(0, len(tasks), batch_size):
+                if stopProcess.get(chat_id, False):
+                    break
+                results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
+                removed += sum(1 for r in results if r is True)
+                await safe_edit(status, f"<i>Removed {removed}/{total} zombies...</i>")
+            keyboard = generate_channel_keyboard(chat_id, user_id)
+            await safe_edit(
+                status,
+                f"<b>Zombies cleaned!</b>\n"
+                f"<code>{removed}</code> out of <code>{total}</code> removed.",
+                reply_markup=keyboard
+            )
+        finally:
+            chatQueue.discard(chat_id)
+            stopProcess.pop(chat_id, None)
 
-    chatQueue.discard(chat_id)
-    if chat_id in stopProcess:
-        del stopProcess[chat_id]
-
-    keyboard = generate_channel_keyboard(chat_id, user_id)
-    await safe_edit(
-        status,
-        f"<b>Zombies cleaned!</b>\n"
-        f"<code>{removed}</code> out of <code>{total}</code> removed.",
-        reply_markup=keyboard
-    )
+    asyncio.create_task(_worker())
 
 @app.on_callback_query(filters.regex(r"^clean_bots:"))
 async def clean_bots_channel(_: Client, cq: CallbackQuery):
@@ -260,11 +290,14 @@ async def clean_bots_channel(_: Client, cq: CallbackQuery):
         _, chat_id_str, user_id_str = cq.data.split(":")
         chat_id = int(chat_id_str)
         user_id = int(user_id_str)
-    except:
+    except Exception:
         return await cq.answer("Invalid data.", show_alert=True)
 
     if not cq.from_user or cq.from_user.id != user_id:
         return await cq.answer("This panel is not for you.", show_alert=True)
+
+    if not await _user_is_target_admin(chat_id, cq.from_user.id):
+        return await cq.answer("Only admins of that channel/chat can run this.", show_alert=True)
 
     if not await _bot_is_admin(chat_id):
         return await cq.answer("I no longer have admin rights.", show_alert=True)
@@ -274,20 +307,25 @@ async def clean_bots_channel(_: Client, cq: CallbackQuery):
 
     chatQueue.add(chat_id)
     stopProcess[chat_id] = False
+    try:
+        bots = await scan_bots(chat_id)
+    except Exception:
+        chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
+        return await cq.answer("Failed to scan bots.", show_alert=True)
 
-    bots = await scan_bots(chat_id)
     total = len(bots)
-
     if total == 0:
         chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
         return await cq.answer("No bots to remove.", show_alert=True)
 
+    await cq.answer()
     status = await cq.edit_message_text(
         f"<i>Removing {total} bots...</i>",
         parse_mode=enums.ParseMode.HTML
     )
 
-    removed = 0
     async def ban_user(uid: int) -> bool:
         max_retries = 3
         for attempt in range(max_retries):
@@ -297,51 +335,62 @@ async def clean_bots_channel(_: Client, cq: CallbackQuery):
             except FloodWait as e:
                 if attempt == max_retries - 1:
                     return False
-                await asyncio.sleep(e.value)
-            except:
+                await asyncio.sleep(min(int(e.value), 60))
+            except Exception:
                 return False
         return False
 
-    tasks = [ban_user(b.id) for b in bots]
-    batch_size = 15
-    for i in range(0, len(tasks), batch_size):
-        if stopProcess.get(chat_id, False):
-            break
-        results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
-        removed += sum(1 for r in results if r is True)
-        await safe_edit(status, f"<i>Removed {removed}/{total} bots...</i>")
+    async def _worker():
+        removed = 0
+        try:
+            tasks = [ban_user(b.id) for b in bots]
+            batch_size = 15
+            for i in range(0, len(tasks), batch_size):
+                if stopProcess.get(chat_id, False):
+                    break
+                results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
+                removed += sum(1 for r in results if r is True)
+                await safe_edit(status, f"<i>Removed {removed}/{total} bots...</i>")
+            keyboard = generate_channel_keyboard(chat_id, user_id)
+            await safe_edit(
+                status,
+                f"<b>Bots cleaned!</b>\n"
+                f"<code>{removed}</code> out of <code>{total}</code> removed.",
+                reply_markup=keyboard
+            )
+        finally:
+            chatQueue.discard(chat_id)
+            stopProcess.pop(chat_id, None)
 
-    chatQueue.discard(chat_id)
-    if chat_id in stopProcess:
-        del stopProcess[chat_id]
-
-    keyboard = generate_channel_keyboard(chat_id, user_id)
-    await safe_edit(
-        status,
-        f"<b>Bots cleaned!</b>\n"
-        f"<code>{removed}</code> out of <code>{total}</code> removed.",
-        reply_markup=keyboard
-    )
+    asyncio.create_task(_worker())
 
 @app.on_callback_query(filters.regex(r"^close_panel:"))
 async def close_panel(_: Client, cq: CallbackQuery):
     try:
         _, user_id_str = cq.data.split(":")
         user_id = int(user_id_str)
-    except:
+    except Exception:
         return await cq.answer("Error.", show_alert=True)
 
-    if cq.from_user.id != user_id:
+    if not cq.from_user or cq.from_user.id != user_id:
         return await cq.answer("Not your panel.", show_alert=True)
 
-    await cq.message.delete()
+    await cq.answer()
+    if cq.message:
+        try:
+            await cq.message.delete()
+        except Exception:
+            pass
 
 @app.on_callback_query(filters.regex(r"^confirm_zombies:"))
 async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
     try:
         chat_id = int(cq.data.split(":")[1])
-    except:
+    except Exception:
         return await cq.answer("Invalid data.", show_alert=True)
+
+    if not cq.message or cq.message.chat.id != chat_id:
+        return await cq.answer("Chat mismatch.", show_alert=True)
 
     if not await is_admin(cq):
         return await cq.answer("Admins only.", show_alert=True)
@@ -351,12 +400,21 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
 
     chatQueue.add(chat_id)
     stopProcess[chat_id] = False
+    try:
+        zombies = await scan_deleted_members(chat_id)
+    except Exception:
+        chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
+        return await cq.answer("Failed to scan zombies.", show_alert=True)
 
-    zombies = await scan_deleted_members(chat_id)
     total = len(zombies)
+    if total == 0:
+        chatQueue.discard(chat_id)
+        stopProcess.pop(chat_id, None)
+        return await cq.answer("No zombies found.", show_alert=True)
 
-    status = await cq.edit_message_text(f"<i>Starting cleanup...</i>", parse_mode=enums.ParseMode.HTML)
-    removed = 0
+    await cq.answer()
+    status = await cq.edit_message_text("<i>Starting cleanup...</i>", parse_mode=enums.ParseMode.HTML)
 
     async def ban_user(uid):
         max_retries = 3
@@ -367,28 +425,39 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
             except FloodWait as e:
                 if attempt == max_retries - 1:
                     return False
-                await asyncio.sleep(e.value)
-            except:
+                await asyncio.sleep(min(int(e.value), 60))
+            except Exception:
                 return False
         return False
 
-    tasks = [ban_user(u.id) for u in zombies]
-    batch_size = 15
-    for i in range(0, len(tasks), batch_size):
-        if stopProcess.get(chat_id, False):
-            break
-        results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
-        removed += sum(1 for r in results if r is True)
-        await safe_edit(status, f"<i>Removed {removed}/{total}...</i>")
+    async def _worker():
+        removed = 0
+        try:
+            tasks = [ban_user(u.id) for u in zombies]
+            batch_size = 15
+            for i in range(0, len(tasks), batch_size):
+                if stopProcess.get(chat_id, False):
+                    break
+                results = await asyncio.gather(*tasks[i:i + batch_size], return_exceptions=True)
+                removed += sum(1 for r in results if r is True)
+                await safe_edit(status, f"<i>Removed {removed}/{total}...</i>")
+            await safe_edit(status, f"<i>Cleanup complete: <code>{removed}</code> removed.</i>")
+        finally:
+            chatQueue.discard(chat_id)
+            stopProcess.pop(chat_id, None)
 
-    chatQueue.discard(chat_id)
-    if chat_id in stopProcess:
-        del stopProcess[chat_id]
-
-    await safe_edit(status, f"<i>Cleanup complete: <code>{removed}</code> removed.</i>")
+    asyncio.create_task(_worker())
 
 @app.on_callback_query(filters.regex(r"^cancel_zombies$"))
 async def cancel_zombie_cleanup(_: Client, cq: CallbackQuery):
+    if not cq.message:
+        return await cq.answer()
+    if not await is_admin(cq):
+        return await cq.answer("Admins only.", show_alert=True)
     chat_id = cq.message.chat.id
     stopProcess[chat_id] = True
-    await cq.edit_message_text("<i>Cancelled.</i>", parse_mode=enums.ParseMode.HTML)
+    await cq.answer("Cancelled.")
+    try:
+        await cq.edit_message_text("<i>Cancelled.</i>", parse_mode=enums.ParseMode.HTML)
+    except Exception:
+        pass

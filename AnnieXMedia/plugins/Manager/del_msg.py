@@ -19,6 +19,7 @@ from AnnieXMedia.utils.database import get_assistant
 from AnnieXMedia.utils.permissions import is_owner_or_sudoer, mention
 
 log = _LOGGER_FACTORY(__name__)
+_active_delete_chats: set[int] = set()
 
 
 
@@ -82,19 +83,19 @@ async def _ensure_assistant_present_and_admin(bot_client, assistant, chat_id) ->
 
 async def _fast_clear_history(assistant, chat_id) -> bool:
     try:
-        await assistant.delete_history(chat_id, revoke=True)
+        await assistant.delete_chat_history(chat_id, revoke=True)
         return True
     except ChatAdminRequired:
         return False
     except FloodWait as e:
         await asyncio.sleep(e.value)
         try:
-            await assistant.delete_history(chat_id, revoke=True)
+            await assistant.delete_chat_history(chat_id, revoke=True)
             return True
         except Exception:
             return False
     except Exception as e:
-        log.warning("delete_history fast path failed: %s", e)
+        log.warning("delete_chat_history fast path failed: %s", e)
         return False
 
 
@@ -159,10 +160,10 @@ async def deleteall_command(client, message: Message):
 
 @app.on_callback_query(filters.regex(r"^deleteall_(yes|no)$"))
 async def deleteall_callback(client, callback: CallbackQuery):
-    if not callback.from_user:
+    if not callback.from_user or not callback.message:
         return await callback.answer("Action not allowed.", show_alert=True)
 
-    _, ans = callback.data.split("_")
+    _, ans = callback.data.split("_", 1)
     chat_id = callback.message.chat.id
     uid = callback.from_user.id
 
@@ -171,37 +172,47 @@ async def deleteall_callback(client, callback: CallbackQuery):
         return await callback.answer("Only the group owner can confirm.", show_alert=True)
 
     if ans == "no":
+        await callback.answer("Cancelled.")
         await _safe_edit(callback, "Delete all canceled.")
         return
 
+    if chat_id in _active_delete_chats:
+        return await callback.answer("Delete-all is already running in this chat.", show_alert=True)
+
+    await callback.answer("Starting delete-all...")
+    _active_delete_chats.add(chat_id)
     await _safe_edit(callback, "⏳ Deleting all messages...")
 
-    assistant = await get_assistant(chat_id)
-    ass_id = await _ensure_assistant_present_and_admin(client, assistant, chat_id)
-
-    try:
-        fast_ok = await _fast_clear_history(assistant, chat_id)
-        if fast_ok:
-            await _safe_edit(callback, "✅ Cleared full chat history for everyone.")
-        else:
-            await _safe_edit(callback, "⚠️ Fast clear not permitted by Telegram. Falling back to high‑speed batch deletion…")
-            skip = {callback.message.id}
-            deleted = await _fallback_batch_delete(assistant, chat_id, skip_ids=skip, concurrency=3, batch_size=100)
-            await _safe_edit(callback, f"✅ Deleted approximately {deleted} messages.")
-    except ChatAdminRequired:
-        await _safe_edit(callback, "❌ Assistant lacks delete rights. Make me able to promote admins.")
-    except Exception as e:
-        log.error("Delete-all fatal error: %s", e)
-        await _safe_edit(callback, f"❌ Failed: {e}")
-    finally:
+    async def _run_deleteall():
+        ass_id = None
+        assistant = None
         try:
-            try:
-                await client.promote_chat_member(chat_id, ass_id, privileges=_Priv())
-            except Exception as e:
-                log.warning("Assistant demote skipped: %s", e)
-            try:
-                await assistant.leave_chat(chat_id)
-            except Exception:
-                pass
-        except Exception:
-            pass
+            assistant = await get_assistant(chat_id)
+            ass_id = await _ensure_assistant_present_and_admin(client, assistant, chat_id)
+
+            fast_ok = await _fast_clear_history(assistant, chat_id)
+            if fast_ok:
+                await _safe_edit(callback, "✅ Cleared full chat history for everyone.")
+            else:
+                await _safe_edit(callback, "⚠️ Fast clear not permitted by Telegram. Falling back to high‑speed batch deletion…")
+                skip = {callback.message.id}
+                deleted = await _fallback_batch_delete(assistant, chat_id, skip_ids=skip, concurrency=3, batch_size=100)
+                await _safe_edit(callback, f"✅ Deleted approximately {deleted} messages.")
+        except ChatAdminRequired:
+            await _safe_edit(callback, "❌ Assistant lacks delete rights. Make me able to promote admins.")
+        except Exception as e:
+            log.error("Delete-all fatal error: %s", e)
+            await _safe_edit(callback, f"❌ Failed: {e}")
+        finally:
+            _active_delete_chats.discard(chat_id)
+            if assistant and ass_id:
+                try:
+                    await client.promote_chat_member(chat_id, ass_id, privileges=_Priv())
+                except Exception as e:
+                    log.warning("Assistant demote skipped: %s", e)
+                try:
+                    await assistant.leave_chat(chat_id)
+                except Exception:
+                    pass
+
+    asyncio.create_task(_run_deleteall())

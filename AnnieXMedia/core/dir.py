@@ -8,6 +8,7 @@ DOWNLOAD_DIR = os.path.join(BASE_DIR, "downloads")
 COUPLE_DIR = os.path.join(BASE_DIR, "couples")
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 BACKUP_DIR = os.path.join(BASE_DIR, "AnnieXMediaBackup")
+PLAYBACK_DIR = os.path.join(BASE_DIR, "playback")
 
 
 def prune_storage_cache(
@@ -19,9 +20,19 @@ def prune_storage_cache(
     removed = 0
     files = []
 
-    for folder in (DOWNLOAD_DIR, CACHE_DIR):
+    folders = [DOWNLOAD_DIR, CACHE_DIR, COUPLE_DIR]
+    if os.path.isdir(PLAYBACK_DIR):
+        try:
+            for sub in os.scandir(PLAYBACK_DIR):
+                if sub.is_dir():
+                    folders.append(sub.path)
+        except OSError:
+            pass
+
+    for folder in folders:
         if not os.path.isdir(folder):
             continue
+        age_limit = 172800 if folder == COUPLE_DIR else max_age_seconds
         try:
             for entry in os.scandir(folder):
                 if not entry.is_file() or entry.name.endswith(".part"):
@@ -30,7 +41,7 @@ def prune_storage_cache(
                     st = entry.stat()
                 except OSError:
                     continue
-                if now - st.st_mtime > max_age_seconds:
+                if now - st.st_mtime > age_limit:
                     try:
                         os.remove(entry.path)
                         removed += 1

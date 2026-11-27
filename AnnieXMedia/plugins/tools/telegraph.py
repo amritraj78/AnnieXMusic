@@ -1,11 +1,23 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import os
+import aiofiles
 import aiohttp
 
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from AnnieXMedia import app
+from AnnieXMedia.utils.downloader import get_http_session
+
+
+async def _stream_file(path: str, chunk_size: int = 65536):
+    async with aiofiles.open(path, "rb") as f:
+        while True:
+            chunk = await f.read(chunk_size)
+            if not chunk:
+                break
+            yield chunk
 
 
 def _extract_uploaded_url(provider: str, text: str, data: object) -> str:
@@ -28,23 +40,27 @@ def _extract_uploaded_url(provider: str, text: str, data: object) -> str:
 
 async def _post_multipart(session: aiohttp.ClientSession, url: str, field: str, path: str, extra: dict) -> tuple[bool, str]:
     filename = os.path.basename(path) or "upload.bin"
-    with open(path, "rb") as f:
-        form = aiohttp.FormData()
-        form.add_field(field, f, filename=filename)
-        for k, v in extra.items():
-            form.add_field(k, v)
-        async with session.post(url, data=form) as resp:
-            body = await resp.text()
-            if resp.status == 200:
-                parsed = None
-                try:
-                    parsed = await resp.json(content_type=None)
-                except Exception:
-                    pass
-                uploaded_url = _extract_uploaded_url(url, body, parsed)
-                if uploaded_url:
-                    return True, uploaded_url
-            return False, f"Error: {resp.status} - {body.strip()[:200]}"
+    form = aiohttp.FormData()
+    form.add_field(field, _stream_file(path), filename=filename)
+    for k, v in extra.items():
+        form.add_field(k, v)
+    async with session.post(
+        url,
+        data=form,
+        headers={"User-Agent": "Mozilla/5.0 (compatible; AnnieXMusic/1.0)"},
+        timeout=aiohttp.ClientTimeout(total=45),
+    ) as resp:
+        body = await resp.text()
+        if resp.status == 200:
+            parsed = None
+            try:
+                parsed = await resp.json(content_type=None)
+            except Exception:
+                pass
+            uploaded_url = _extract_uploaded_url(url, body, parsed)
+            if uploaded_url:
+                return True, uploaded_url
+        return False, f"Error: {resp.status} - {body.strip()[:200]}"
 
 
 async def upload_file(path: str):
@@ -55,19 +71,17 @@ async def upload_file(path: str):
         ("https://uguu.se/upload", "files[]", {}),
         ("https://tmpfiles.org/api/v1/upload", "file", {}),
     ]
-    timeout = aiohttp.ClientTimeout(total=30)
-    headers = {"User-Agent": "Mozilla/5.0 (compatible; AnnieXMusic/1.0)"}
     last_err = "Upload failed."
+    session = await get_http_session()
 
-    async with aiohttp.ClientSession(timeout=timeout, headers=headers) as session:
-        for url, field, extra in providers:
-            try:
-                ok, result = await _post_multipart(session, url, field, path, extra)
-                if ok:
-                    return True, result
-                last_err = result
-            except Exception as exc:
-                last_err = str(exc)
+    for url, field, extra in providers:
+        try:
+            ok, result = await _post_multipart(session, url, field, path, extra)
+            if ok:
+                return True, result
+            last_err = result
+        except Exception as exc:
+            last_err = str(exc)
 
     return False, last_err
 
@@ -106,11 +120,16 @@ async def telegraph_handler(_, message: Message):
                 ),
             )
         else:
-            await status.edit(f"❌ **Upload failed:**\n`{result}`")
+            safe_res = str(result).replace("`", "'")
+            await status.edit(f"❌ **Upload failed:**\n`{safe_res}`")
 
     except Exception as e:
-        await status.edit(f"❌ **Failed to process media:**\n`{e}`")
+        safe_err = str(e).replace("`", "'")
+        await status.edit(f"❌ **Failed to process media:**\n`{safe_err}`")
 
     finally:
         if local_path and os.path.exists(local_path):
-            os.remove(local_path)
+            try:
+                await asyncio.to_thread(os.remove, local_path)
+            except OSError:
+                pass

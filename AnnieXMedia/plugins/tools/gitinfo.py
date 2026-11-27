@@ -7,6 +7,8 @@ from pyrogram.types import Message, InlineKeyboardButton, InlineKeyboardMarkup, 
 from pyrogram.enums import ParseMode
 
 from AnnieXMedia import app
+from AnnieXMedia.utils.downloader import get_http_session
+from AnnieXMedia.utils.security import validate_github_username
 
 
 def _safe(x: str | None) -> str:
@@ -34,37 +36,48 @@ async def github(_, message: Message):
             link_preview_options=LinkPreviewOptions(is_disabled=True),
         )
 
-    username = message.command[1].strip()
+    username = validate_github_username(message.command[1])
+    if not username:
+        return await message.reply_text(
+            "🚫 <b>ɪɴᴠᴀʟɪᴅ ɢɪᴛʜᴜʙ ᴜsᴇʀɴᴀᴍᴇ!</b>",
+            parse_mode=ParseMode.HTML,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
+
     api = f"https://api.github.com/users/{username}"
 
-    async with aiohttp.ClientSession() as session:
-        try:
-            async with session.get(api, timeout=aiohttp.ClientTimeout(total=15)) as r:
-                if r.status == 404:
-                    return await message.reply_text(
-                        "🚫 <b>ᴜsᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ!</b>",
-                        parse_mode=ParseMode.HTML,
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    )
-                if r.status == 403:
-                    return await message.reply_text(
-                        "⚠️ <b>ʀᴀᴛᴇ ʟɪᴍɪᴛ ʜɪᴛ. ᴛʀʏ ᴀɢᴀɪɴ sᴏᴏɴ.</b>",
-                        parse_mode=ParseMode.HTML,
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    )
-                if r.status != 200:
-                    return await message.reply_text(
-                        f"⚠️ <b>ᴇʀʀᴏʀ ғᴇᴛᴄʜɪɴɢ ᴅᴀᴛᴀ (HTTP {r.status}).</b>",
-                        parse_mode=ParseMode.HTML,
-                        link_preview_options=LinkPreviewOptions(is_disabled=True),
-                    )
-                data = await r.json()
-        except Exception as e:
-            return await message.reply_text(
-                f"⚠️ <b>ʀᴇQᴜᴇsᴛ ꜰᴀɪʟᴇᴅ:</b> <code>{html.escape(str(e))}</code>",
-                parse_mode=ParseMode.HTML,
-                link_preview_options=LinkPreviewOptions(is_disabled=True),
-            )
+    session = await get_http_session()
+    try:
+        async with session.get(
+            api,
+            headers={"Accept": "application/vnd.github+json", "User-Agent": "AnnieXMusic"},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as r:
+            if r.status == 404:
+                return await message.reply_text(
+                    "🚫 <b>ᴜsᴇʀ ɴᴏᴛ ғᴏᴜɴᴅ!</b>",
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            if r.status == 403:
+                return await message.reply_text(
+                    "⚠️ <b>ʀᴀᴛᴇ ʟɪᴍɪᴛ ʜɪᴛ. ᴛʀʏ ᴀɢᴀɪɴ sᴏᴏɴ.</b>",
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            if r.status != 200:
+                return await message.reply_text(
+                    f"⚠️ <b>ᴇʀʀᴏʀ ғᴇᴛᴄʜɪɴɢ ᴅᴀᴛᴀ (HTTP {r.status}).</b>",
+                    parse_mode=ParseMode.HTML,
+                    link_preview_options=LinkPreviewOptions(is_disabled=True),
+                )
+            data = await r.json()
+    except Exception as e:
+        return await message.reply_text(
+            f"⚠️ <b>ʀᴇQᴜᴇsᴛ ꜰᴀɪʟᴇᴅ:</b> <code>{html.escape(str(e))}</code>",
+            parse_mode=ParseMode.HTML,
+            link_preview_options=LinkPreviewOptions(is_disabled=True),
+        )
 
     name = _safe(data.get("name") or "Not specified")
     bio = _short(_safe(data.get("bio") or "No bio available."))

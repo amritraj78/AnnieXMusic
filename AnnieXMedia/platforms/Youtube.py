@@ -18,6 +18,7 @@ from AnnieXMedia.utils.database import is_on_off
 from AnnieXMedia.utils.downloader import extract_video_id, get_http_session, yt_dlp_download
 from AnnieXMedia.utils.errors import capture_internal_err
 from AnnieXMedia.utils.formatters import time_to_seconds
+from AnnieXMedia.utils.security import is_safe_http_url
 from AnnieXMedia.utils.tuning import YTDLP_TIMEOUT, YOUTUBE_META_MAX, YOUTUBE_META_TTL
 
 
@@ -53,7 +54,15 @@ async def _exec_proc(*args: str) -> Tuple[bytes, bytes]:
     except asyncio.TimeoutError:
         with contextlib.suppress(Exception):
             proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
         return b"", b"timeout"
+    except asyncio.CancelledError:
+        with contextlib.suppress(Exception):
+            proc.kill()
+        with contextlib.suppress(Exception):
+            await proc.wait()
+        raise
 
 
 @capture_internal_err
@@ -88,20 +97,29 @@ class YouTubeAPI:
     def __init__(self) -> None:
         self.base_url = "https://www.youtube.com/watch?v="
         self.playlist_url = "https://youtube.com/playlist?list="
-        self._url_pattern = re.compile(r"(?:youtube\.com|youtu\.be)")
+        self._url_pattern = re.compile(
+            r"^https?://(?:[\w-]+\.)?(?:youtube\.com|youtu\.be)/", re.I
+        )
 
     def _prepare_link(self, link: str, videoid: Union[str, bool, None] = None) -> str:
+        s = (link or "").strip()
         if isinstance(videoid, str) and videoid.strip():
-            link = self.base_url + videoid.strip()
+            vid = extract_video_id(videoid.strip()) or videoid.strip()
+            s = self.base_url + vid if YOUTUBE_ID_RE.match(vid) else vid
+        elif videoid is True and YOUTUBE_ID_RE.match(s):
+            s = self.base_url + s
 
-        link = link.strip()
+        low = s.lower()
+        if "youtu.be/" in low:
+            tail = s.split("/")[-1].split("?")[0]
+            if YOUTUBE_ID_RE.match(tail):
+                return self.base_url + tail
+        elif "youtube.com/shorts/" in low or "youtube.com/live/" in low:
+            tail = s.split("/")[-1].split("?")[0]
+            if YOUTUBE_ID_RE.match(tail):
+                return self.base_url + tail
 
-        if "youtu.be" in link:
-            link = self.base_url + link.split("/")[-1].split("?")[0]
-        elif "youtube.com/shorts/" in link or "youtube.com/live/" in link:
-            link = self.base_url + link.split("/")[-1].split("?")[0]
-
-        return link.split("&")[0]
+        return s.split("&")[0] if "watch?v=" in low else s
 
     # === URL Handling ===
     @capture_internal_err
@@ -145,11 +163,13 @@ class YouTubeAPI:
     @capture_internal_err
     async def is_live(self, link: str) -> bool:
         prepared = self._prepare_link(link)
-        stdout, _ = await _exec_proc("yt-dlp", *(_cookies_args()), "--dump-json", prepared)
+        if not await self.exists(prepared) or not await is_safe_http_url(prepared):
+            return False
+        stdout, _ = await _exec_proc("yt-dlp", *(_cookies_args()), "--dump-json", "--", prepared)
         if not stdout:
             return False
         try:
-            info = json.loads(stdout.decode())
+            info = json.loads(stdout.decode("utf-8", errors="replace"))
             return bool(info.get("is_live"))
         except json.JSONDecodeError:
             return False
@@ -237,8 +257,12 @@ class YouTubeAPI:
                         "thumbnail": oembed.get("thumbnail_url", ""),
                     }
             else:
+                if not await self.exists(prepared_link) or not await is_safe_http_url(prepared_link):
+                    raise ValueError(
+                        f"Unsupported or invalid YouTube target: '{prepared_link[:80]}'"
+                    )
                 stdout, stderr = await _exec_proc(
-                    "yt-dlp", *(_cookies_args()), "--dump-json", "--no-warnings", prepared_link
+                    "yt-dlp", *(_cookies_args()), "--dump-json", "--no-warnings", "--", prepared_link
                 )
 
                 def _both_failed(details: str) -> ValueError:
@@ -249,13 +273,13 @@ class YouTubeAPI:
                     )
 
                 if not stdout:
-                    stderr_msg = stderr.decode().strip() if stderr else "Empty response"
-                    raise _both_failed(f"  2. yt-dlp error: {stderr_msg}")
+                    stderr_msg = stderr.decode("utf-8", errors="replace").strip() if stderr else "Empty response"
+                    raise _both_failed(f"  2. yt-dlp error: {stderr_msg[:300]}")
 
                 try:
-                    info = json.loads(stdout.decode())
+                    info = json.loads(stdout.decode("utf-8", errors="replace"))
                 except json.JSONDecodeError as json_err:
-                    raw = stdout.decode()[:400]
+                    raw = stdout.decode("utf-8", errors="replace")[:400]
                     raise _both_failed(
                         f"  2. yt-dlp JSON error: {json_err}\n"
                         f"     Raw: {raw}..."
@@ -283,26 +307,41 @@ class YouTubeAPI:
     @capture_internal_err
     async def video(self, link: str, videoid: Union[str, bool, None] = None) -> Tuple[int, str]:
         link = self._prepare_link(link, videoid)
+        if not await self.exists(link) or not await is_safe_http_url(link):
+            return 0, "Invalid YouTube URL"
         stdout, stderr = await _exec_proc(
             "yt-dlp",
             *(_cookies_args()),
             "-g",
             "-f",
             "best[height<=?720][width<=?1280]",
+            "--",
             link,
         )
-        return (1, stdout.decode().split("\n")[0]) if stdout else (0, stderr.decode())
+        return (
+            (1, stdout.decode("utf-8", errors="replace").split("\n")[0])
+            if stdout
+            else (0, stderr.decode("utf-8", errors="replace")[:300])
+        )
 
     @capture_internal_err
     async def playlist(
         self, link: str, limit: int, user_id, videoid: Union[str, bool, None] = None
     ) -> List[str]:
-        if videoid:
-            link = self.playlist_url + str(videoid)
-        link = self._prepare_link(link).split("&")[0]
+        raw = (link or "").strip()
+        if isinstance(videoid, str) and videoid.strip():
+            raw = self.playlist_url + videoid.strip()
+        elif videoid is True and raw and not raw.startswith("http"):
+            raw = self.playlist_url + raw
+        elif "list=" in raw:
+            list_id = raw.split("list=", 1)[1].split("&", 1)[0]
+            if list_id:
+                raw = self.playlist_url + list_id
+        if not await self.exists(raw) or not await is_safe_http_url(raw):
+            return []
 
         try:
-            plist = await Playlist.get(link)
+            plist = await Playlist.get(raw)
             items = [video.get("id") for video in plist.get("videos", [])[:limit] if video.get("id")]
             if items:
                 return items
@@ -318,9 +357,10 @@ class YouTubeAPI:
             "--playlist-end",
             str(limit),
             "--skip-download",
-            link,
+            "--",
+            raw,
         )
-        items = stdout.decode().strip().split("\n") if stdout else []
+        items = stdout.decode("utf-8", errors="replace").strip().split("\n") if stdout else []
         return [i for i in items if i]
 
     @capture_internal_err
@@ -328,6 +368,8 @@ class YouTubeAPI:
         self, link: str, videoid: Union[str, bool, None] = None
     ) -> Tuple[List[Dict], str]:
         link = self._prepare_link(link, videoid)
+        if not await self.exists(link) or not await is_safe_http_url(link):
+            return [], link
         key = f"f:{link}"
         now = time.time()
 
@@ -336,7 +378,7 @@ class YouTubeAPI:
             if cached and now - cached[0] < YOUTUBE_META_TTL:
                 return cached[1], cached[2]
 
-        opts = {"quiet": True}
+        opts = {"quiet": True, "socket_timeout": 12}
         if cf := _cookiefile_path():
             opts["cookiefile"] = cf
 
@@ -349,7 +391,7 @@ class YouTubeAPI:
 
         out: List[Dict] = []
         try:
-            info = await asyncio.to_thread(_extract_sync)
+            info = await asyncio.wait_for(asyncio.to_thread(_extract_sync), timeout=20.0)
             if info:
                 for fmt in info.get("formats", []):
                     if "dash" in str(fmt.get("format", "")).lower():
@@ -374,10 +416,11 @@ class YouTubeAPI:
         except Exception:
             pass
 
-        async with _formats_lock:
-            if len(_formats_cache) > YOUTUBE_META_MAX:
-                _formats_cache.clear()
-            _formats_cache[key] = (now, out, link)
+        if out:
+            async with _formats_lock:
+                if len(_formats_cache) > YOUTUBE_META_MAX:
+                    _formats_cache.clear()
+                _formats_cache[key] = (now, out, link)
 
         return out, link
 
@@ -432,16 +475,18 @@ class YouTubeAPI:
                 p = await yt_dlp_download(link, type="video", title=resolved_title)
                 return (p, True) if p else (None, None)
 
-            stdout, _ = await _exec_proc(
-                "yt-dlp",
-                *(_cookies_args()),
-                "-g",
-                "-f",
-                "best[height<=?720][width<=?1280]",
-                link,
-            )
-            if stdout:
-                return stdout.decode().split("\n")[0], None
+            if await self.exists(link) and await is_safe_http_url(link):
+                stdout, _ = await _exec_proc(
+                    "yt-dlp",
+                    *(_cookies_args()),
+                    "-g",
+                    "-f",
+                    "best[height<=?720][width<=?1280]",
+                    "--",
+                    link,
+                )
+                if stdout:
+                    return stdout.decode("utf-8", errors="replace").split("\n")[0], None
             p = await yt_dlp_download(link, type="video", title=resolved_title)
             return (p, True) if p else (None, None)
 

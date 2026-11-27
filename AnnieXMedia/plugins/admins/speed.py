@@ -7,7 +7,7 @@ from AnnieXMedia import app
 from AnnieXMedia.core.call import StreamController
 from AnnieXMedia.misc import SUDOERS, db
 from AnnieXMedia.utils import AdminRightsCheck
-from AnnieXMedia.utils.database import is_active_chat, is_nonadmin_chat
+from AnnieXMedia.utils.database import get_cmode, is_active_chat, is_nonadmin_chat
 from AnnieXMedia.utils.decorators.language import languageCB
 from AnnieXMedia.utils.inline import close_markup, speed_markup
 
@@ -40,12 +40,22 @@ async def playback(cli, message: Message, _, chat_id):
 @app.on_callback_query(filters.regex("SpeedUP") & ~BANNED_USERS)
 @languageCB
 async def manage_callback(client, CallbackQuery, _):
-    if not CallbackQuery.from_user:
+    if not CallbackQuery.from_user or not CallbackQuery.message:
         return await CallbackQuery.answer("Action not allowed.", show_alert=True)
-    callback_data = CallbackQuery.data.strip()
-    callback_request = callback_data.split(None, 1)[1]
-    chat, speed = callback_request.split("|")
-    chat_id = int(chat)
+    parts = CallbackQuery.data.strip().split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return
+    chat, speed = parts[1].split("|", 1)
+    try:
+        chat_id = int(chat)
+    except ValueError:
+        return
+    allowed = {CallbackQuery.message.chat.id}
+    cmode_id = await get_cmode(CallbackQuery.message.chat.id)
+    if cmode_id:
+        allowed.add(cmode_id)
+    if chat_id not in allowed:
+        return await CallbackQuery.answer("Unauthorized chat control.", show_alert=True)
     if not await is_active_chat(chat_id):
         return await CallbackQuery.answer(_["general_5"], show_alert=True)
     is_non_admin = await is_nonadmin_chat(CallbackQuery.message.chat.id)
@@ -85,32 +95,29 @@ async def manage_callback(client, CallbackQuery, _):
             _["admin_30"],
             show_alert=True,
         )
-    else:
-        checker.append(chat_id)
+    checker.append(chat_id)
     try:
-        await CallbackQuery.answer(
-            _["admin_31"],
+        try:
+            await CallbackQuery.answer(_["admin_31"])
+        except Exception:
+            pass
+        user_mention = CallbackQuery.from_user.mention if CallbackQuery.from_user else "Admin"
+        mystic = await CallbackQuery.edit_message_text(
+            text=_["admin_32"].format(user_mention),
         )
-    except:
-        pass
-    user_mention = CallbackQuery.from_user.mention if CallbackQuery.from_user else "Admin"
-    mystic = await CallbackQuery.edit_message_text(
-        text=_["admin_32"].format(user_mention),
-    )
-    try:
-        await StreamController.speedup_stream(
-            chat_id,
-            file_path,
-            speed,
-            playing,
+        try:
+            await StreamController.speedup_stream(
+                chat_id,
+                file_path,
+                speed,
+                playing,
+            )
+        except Exception:
+            return await mystic.edit_text(_["admin_33"], reply_markup=close_markup(_))
+        await mystic.edit_text(
+            text=_["admin_34"].format(speed, user_mention),
+            reply_markup=close_markup(_),
         )
-    except:
+    finally:
         if chat_id in checker:
             checker.remove(chat_id)
-        return await mystic.edit_text(_["admin_33"], reply_markup=close_markup(_))
-    if chat_id in checker:
-        checker.remove(chat_id)
-    await mystic.edit_text(
-        text=_["admin_34"].format(speed, user_mention),
-        reply_markup=close_markup(_),
-    )

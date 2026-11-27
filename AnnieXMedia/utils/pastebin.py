@@ -1,10 +1,12 @@
 # Authored By Certified Coders © 2025
+import asyncio
+import socket
+from functools import partial
+
 import aiohttp
 
-
-import socket
-from asyncio import get_running_loop
-from functools import partial
+from AnnieXMedia.utils.downloader import get_http_session
+from AnnieXMedia.utils.security import redact_secrets
 
 
 def _netcat(host, port, content):
@@ -14,7 +16,7 @@ def _netcat(host, port, content):
         s.connect((host, port))
         s.sendall(content.encode())
         s.shutdown(socket.SHUT_WR)
-        data = s.recv(4096).decode("utf-8").strip("\n\x00")
+        data = s.recv(4096).decode("utf-8", errors="replace").strip("\n\x00")
         return data if data else None
     except Exception:
         return None
@@ -23,25 +25,23 @@ def _netcat(host, port, content):
 
 
 async def paste(content):
-    loop = get_running_loop()
-    link = await loop.run_in_executor(None, partial(_netcat, "ezup.dev", 9999, content))
-    return link
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(None, partial(_netcat, "ezup.dev", 9999, content))
 
-
-####2nd paste code 
 
 BASE = "https://batbin.me/"
 
 
 async def post(url: str, *args, **kwargs):
     try:
-        async with aiohttp.ClientSession(timeout=aiohttp.ClientTimeout(total=15)) as session:
-            async with session.post(url, *args, **kwargs) as resp:
-                try:
-                    data = await resp.json()
-                except Exception:
-                    data = await resp.text()
-                return data
+        session = await get_http_session()
+        async with session.post(
+            url, *args, timeout=aiohttp.ClientTimeout(total=15), **kwargs
+        ) as resp:
+            try:
+                return await resp.json(content_type=None)
+            except Exception:
+                return await resp.text()
     except Exception:
         return None
 
@@ -49,7 +49,7 @@ async def post(url: str, *args, **kwargs):
 async def ANNIEBIN(text):
     if not text:
         return None
-    text_str = str(text)
+    text_str = redact_secrets(str(text))
     resp = await post(f"{BASE}api/v2/paste", data=text_str)
     if isinstance(resp, dict) and resp.get("success") and "message" in resp:
         return BASE + resp["message"]

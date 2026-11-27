@@ -329,7 +329,8 @@ async def kickme_cmd(client, message: Message):
         return await message.reply_text("Nice try, boss 😅 I can’t kick admins or the owner.")
 
     bot_mem = await _get_bot_member(client, message.chat.id)
-    if not bot_mem or not getattr(bot_mem, "can_restrict_members", False):
+    bot_priv = getattr(bot_mem, "privileges", None) if bot_mem else None
+    if not bot_priv or not getattr(bot_priv, "can_restrict_members", False):
         return await message.reply_text("I need ban permissions to kick you. Ask an admin to enable it.")
 
     try:

@@ -1,83 +1,94 @@
 # Authored By Certified Coders © 2025
-# Authored By Certified Coders © 2025
 
-import os
-import json
-import shutil
-import zipfile
 import asyncio
+import json
+import os
+import tempfile
+import zipfile
 from datetime import datetime, timedelta
-from motor.motor_asyncio import AsyncIOMotorClient
+
 from pyrogram import Client, filters
 from pyrogram.types import Message
-from AnnieXMedia import app
-from AnnieXMedia.core.mongo import mongodb
-from config import MONGO_DB_URI, LOGGER_ID, OWNER_ID
-from AnnieXMedia.logging import LOGGER
-from AnnieXMedia.core.dir import BACKUP_DIR
 
-TEMP_DIR = os.path.join(BACKUP_DIR, "tmp")
+from AnnieXMedia import app
+from AnnieXMedia.core.dir import BACKUP_DIR
+from AnnieXMedia.core.mongo import mongodb
+from AnnieXMedia.logging import LOGGER
+from AnnieXMedia.utils.security import redact_secrets
+from config import LOGGER_ID, OWNER_ID
+
+_backup_lock = asyncio.Lock()
+
+
+def _write_json(path: str, data: list):
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2, default=str)
+
 
 async def _dump_collection(collection, path: str):
     data = []
     async for doc in collection.find({}):
         doc.pop("_id", None)
-        for key, value in doc.items():
+        for key, value in list(doc.items()):
             if isinstance(value, datetime):
                 doc[key] = value.isoformat()
         data.append(doc)
     if data:
-        os.makedirs(os.path.dirname(path), exist_ok=True)
-        with open(path, "w", encoding="utf-8") as f:
-            json.dump(data, f, ensure_ascii=False, indent=2)
+        await asyncio.to_thread(_write_json, path, data)
 
-def _build_zip_archive(zip_path: str):
+
+def _build_zip_archive(zip_path: str, source_dir: str):
     with zipfile.ZipFile(zip_path, "w", zipfile.ZIP_DEFLATED) as zf:
-        for root, _, files in os.walk(TEMP_DIR):
+        for root, _, files in os.walk(source_dir):
             for file in files:
                 fp = os.path.join(root, file)
-                arc = os.path.join("Annie", os.path.relpath(fp, TEMP_DIR))
+                arc = os.path.join("Annie", os.path.relpath(fp, source_dir))
                 zf.write(fp, arc)
-    shutil.rmtree(TEMP_DIR, ignore_errors=True)
+
 
 async def _create_backup_zip() -> str:
-    LOGGER(__name__).info("🗂️ Starting backup process for all collections…")
+    async with _backup_lock:
+        LOGGER(__name__).info("🗂️ Starting backup process for all collections…")
+        os.makedirs(BACKUP_DIR, exist_ok=True)
 
-    collections = await mongodb.list_collection_names()
+        collections = await mongodb.list_collection_names()
 
-    for fname in os.listdir(BACKUP_DIR):
-        fpath = os.path.join(BACKUP_DIR, fname)
-        if os.path.isfile(fpath) and fname.endswith(".zip"):
+        for fname in os.listdir(BACKUP_DIR):
+            fpath = os.path.join(BACKUP_DIR, fname)
+            if os.path.isfile(fpath) and fname.endswith(".zip"):
+                try:
+                    os.remove(fpath)
+                except Exception:
+                    pass
+
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        zip_name = f"AnnieXMedia_Backup_{timestamp}.zip"
+        zip_path = os.path.join(BACKUP_DIR, zip_name)
+
+        with tempfile.TemporaryDirectory(dir=BACKUP_DIR, prefix="tmp_") as tmp_dir:
+            tasks = [
+                _dump_collection(mongodb[coll], os.path.join(tmp_dir, f"{coll}.json"))
+                for coll in collections
+            ]
+            await asyncio.gather(*tasks)
+
+            LOGGER(__name__).info(f"📦 Creating backup archive: {zip_name}")
+            await asyncio.to_thread(_build_zip_archive, zip_path, tmp_dir)
+
+        return zip_path
+
+
+async def _send_backup(zip_path: str, chat_id: int, caption: str):
+    try:
+        await app.send_document(chat_id=chat_id, document=zip_path, caption=caption)
+    finally:
+        if zip_path and os.path.exists(zip_path):
             try:
-                os.remove(fpath)
+                os.remove(zip_path)
             except Exception:
                 pass
 
-    if os.path.exists(TEMP_DIR):
-        shutil.rmtree(TEMP_DIR, ignore_errors=True)
-    os.makedirs(TEMP_DIR, exist_ok=True)
-
-    tasks = [
-        _dump_collection(mongodb[coll], os.path.join(TEMP_DIR, f"{coll}.json"))
-        for coll in collections
-    ]
-    await asyncio.gather(*tasks)
-
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    zip_name = f"AnnieXMedia_Backup_{timestamp}.zip"
-    zip_path = os.path.join(BACKUP_DIR, zip_name)
-
-    LOGGER(__name__).info(f"📦 Creating backup archive: {zip_name}")
-    await asyncio.to_thread(_build_zip_archive, zip_path)
-    return zip_path
-
-async def _send_backup(zip_path: str, chat_id: int, caption: str):
-    await app.send_document(chat_id=chat_id, document=zip_path, caption=caption)
-    if os.path.exists(zip_path):
-        try:
-            os.remove(zip_path)
-        except Exception:
-            pass
 
 @app.on_message(filters.command("backup") & filters.user(OWNER_ID))
 async def manual_backup(_: Client, message: Message):
@@ -93,13 +104,18 @@ async def manual_backup(_: Client, message: Message):
             f"**File:** `{os.path.basename(zip_path)}`"
         )
         await _send_backup(zip_path, message.chat.id, caption)
-        await processing.delete()
+        try:
+            await processing.delete()
+        except Exception:
+            pass
     except Exception as e:
+        safe_err = redact_secrets(str(e))
         await processing.edit_text(
             "❌ **Backup Failed!**\n"
-            f"**Error:** `{e}`"
+            f"**Error:** `{safe_err}`"
         )
-        LOGGER(__name__).error(f"Manual backup failed: {e}")
+        LOGGER(__name__).error(f"Manual backup failed: {safe_err}")
+
 
 async def daily_backup_task():
     while True:
@@ -117,7 +133,8 @@ async def daily_backup_task():
             await _send_backup(zip_path, LOGGER_ID, caption)
             LOGGER(__name__).info("Daily backup sent to LOGGER_ID.")
         except Exception as e:
-            LOGGER(__name__).error(f"Daily backup failed: {e}")
+            LOGGER(__name__).error(f"Daily backup failed: {redact_secrets(str(e))}")
+
 
 try:
     asyncio.create_task(daily_backup_task())

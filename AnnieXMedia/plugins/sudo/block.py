@@ -19,6 +19,8 @@ async def useradd(client, message: Message, _):
     user = await extract_user(message)
     if not user:
         return await message.reply_text(_["general_1"])
+    if user.id in SUDOERS or user.id == app.id:
+        return await message.reply_text("🚫 Cannot block a sudoer or the bot itself.")
     if user.id in BANNED_USERS:
         return await message.reply_text(_["block_1"].format(user.mention))
     await add_gban_user(user.id)
@@ -38,7 +40,7 @@ async def userdel(client, message: Message, _):
     if user.id not in BANNED_USERS:
         return await message.reply_text(_["block_3"].format(user.mention))
     await remove_gban_user(user.id)
-    BANNED_USERS.remove(user.id)
+    BANNED_USERS.discard(user.id)
     await message.reply_text(_["block_4"].format(user.mention))
 
 
@@ -50,14 +52,14 @@ async def sudoers_list(client, message: Message, _):
     mystic = await message.reply_text(_["block_6"])
     msg = _["block_7"]
     count = 0
-    for users in BANNED_USERS:
+    for users in list(BANNED_USERS):
         try:
             user = await app.get_users(users)
-            user = user.first_name if not user.mention else user.mention
+            user_str = user.first_name if not user.mention else user.mention
             count += 1
             if len(msg) < 3900:
-                msg += f"{count}➤ {user}\n"
-        except:
+                msg += f"{count}➤ {user_str}\n"
+        except Exception:
             continue
     if count == 0:
         return await mystic.edit_text(_["block_5"])

@@ -4,6 +4,8 @@ from AnnieXMedia.utils.database import get_cmode
 
 
 async def get_channeplayCB(_, command, CallbackQuery):
+    if not CallbackQuery or not getattr(CallbackQuery, "message", None):
+        return None, None
     if command == "c":
         chat_id = await get_cmode(CallbackQuery.message.chat.id)
         if chat_id is None:

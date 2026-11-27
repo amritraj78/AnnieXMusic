@@ -1,6 +1,7 @@
 # Authored By Certified Coders © 2025
 """Telegram Mini App, Neon Arcade Games, and BotFather Game callback handlers."""
 import contextlib
+import html
 
 from pyrogram import filters
 from pyrogram.enums import ChatType
@@ -120,9 +121,11 @@ def _is_game_callback(_, __, query: CallbackQuery) -> bool:
     return bool(getattr(query, "game_short_name", None))
 
 
-@app.on_callback_query(filters.create(_is_game_callback))
+@app.on_callback_query(filters.create(_is_game_callback) & ~BANNED_USERS)
 async def game_callback(_, query: CallbackQuery):
     """Answer BotFather callback_game query with a signed score-sync URL."""
+    if not query.from_user or not _WEBAPP_URL.startswith("https://"):
+        return await query.answer("⚠️ Game temporarily unavailable.", show_alert=True)
     short = str(query.game_short_name or "").strip().lower()
     game_mode = _GAME_KEY_ALIASES.get(short, "beats")
     user = query.from_user
@@ -145,8 +148,10 @@ async def game_callback(_, query: CallbackQuery):
 @app.on_message(filters.command("setmenubutton") & SUDOERS)
 async def cmd_setmenubutton(_, message: Message):
     """Set the bot's menu button to open the Mini App."""
+    if not _WEBAPP_URL.startswith("https://"):
+        return await message.reply_text("⚠️ WEBAPP_URL must start with `https://`.")
     try:
         await set_webapp_menu_button(app, f"{_WEBAPP_URL}/app")
         await message.reply_text("✅ Menu button updated! Tap **🎵 Open App** in private chat.")
     except Exception as e:
-        await message.reply_text(f"❌ Failed to set menu button:\n`{e}`")
+        await message.reply_text(f"❌ Failed to set menu button:\n<code>{html.escape(str(e))}</code>")

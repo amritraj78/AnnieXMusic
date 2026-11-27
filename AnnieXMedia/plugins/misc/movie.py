@@ -1,12 +1,17 @@
 # Authored By Certified Coders © 2025
+import asyncio
+import html
+import os
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from pyrogram.enums import ParseMode
 from AnnieXMedia import app
-import httpx
+from AnnieXMedia.logging import LOGGER
+from AnnieXMedia.utils.downloader import get_http_session
 
 
-TMDB_API_KEY = "23c3b139c6d59ebb608fe6d5b974d888"
+TMDB_API_KEY = os.getenv("TMDB_API_KEY", "23c3b139c6d59ebb608fe6d5b974d888")
 TMDB_BASE = "https://api.themoviedb.org/3"
 
 
@@ -23,62 +28,72 @@ async def movie_command(client: Client, message: Message):
 
     try:
         info = await get_movie_info(movie_name)
-        await status.edit_text(info, parse_mode=ParseMode.MARKDOWN)
+        await status.edit_text(info, parse_mode=ParseMode.HTML)
     except Exception as e:
-        print(f"[Movie Error] {e}")
+        LOGGER(__name__).warning(f"[Movie Error] {e}")
         await status.edit_text("❌ Failed to fetch movie information.")
 
 
 async def get_movie_info(query: str) -> str:
-    async with httpx.AsyncClient(timeout=10.0) as client:
-        search = await client.get(f"{TMDB_BASE}/search/movie", params={
-            "api_key": TMDB_API_KEY,
-            "query": query
-        })
-        if search.status_code != 200:
+    session = await get_http_session()
+    timeout = aiohttp.ClientTimeout(total=10)
+
+    async with session.get(
+        f"{TMDB_BASE}/search/movie",
+        params={"api_key": TMDB_API_KEY, "query": query},
+        timeout=timeout,
+    ) as search:
+        if search.status != 200:
             return "❌ Movie service unavailable. Try again later."
         try:
-            search_data = search.json()
+            search_data = await search.json()
         except Exception:
             return "❌ Failed to parse movie response."
-        if not search_data.get("results"):
-            return "❌ Movie not found."
 
-        movie = search_data["results"][0]
-        movie_id = movie["id"]
+    results = search_data.get("results") or []
+    if not results:
+        return "❌ Movie not found."
 
-        details = await client.get(f"{TMDB_BASE}/movie/{movie_id}", params={
-            "api_key": TMDB_API_KEY
-        })
+    movie = results[0]
+    movie_id = movie.get("id")
+    if not movie_id:
+        return "❌ Movie not found."
+
+    async def _get_json(url: str) -> dict:
         try:
-            details_data = details.json()
+            async with session.get(url, params={"api_key": TMDB_API_KEY}, timeout=timeout) as resp:
+                if resp.status == 200:
+                    return await resp.json()
         except Exception:
-            details_data = {}
+            pass
+        return {}
 
-        cast = await client.get(f"{TMDB_BASE}/movie/{movie_id}/credits", params={
-            "api_key": TMDB_API_KEY
-        })
-        try:
-            cast_data = cast.json()
-        except Exception:
-            cast_data = {}
-        actors = ", ".join([actor["name"] for actor in cast_data.get("cast", [])[:5]]) or "N/A"
+    details_data, cast_data = await asyncio.gather(
+        _get_json(f"{TMDB_BASE}/movie/{movie_id}"),
+        _get_json(f"{TMDB_BASE}/movie/{movie_id}/credits"),
+    )
 
-        title = details_data.get("title", "N/A")
-        release = details_data.get("release_date", "N/A")
-        overview = details_data.get("overview", "N/A")
-        rating = details_data.get("vote_average", "N/A")
-        revenue = details_data.get("revenue", 0)
+    actors = ", ".join(
+        html.escape(str(actor.get("name", "")))
+        for actor in (cast_data.get("cast") or [])[:5]
+        if isinstance(actor, dict) and actor.get("name")
+    ) or "N/A"
 
-        revenue_str = f"${revenue:,}" if revenue else "Not Available"
+    title = html.escape(str(details_data.get("title") or movie.get("title") or "N/A"))
+    release = html.escape(str(details_data.get("release_date") or "N/A"))
+    overview = html.escape(str(details_data.get("overview") or "N/A"))
+    rating = html.escape(str(details_data.get("vote_average") or "N/A"))
+    revenue = details_data.get("revenue", 0)
 
-        info = (
-            f"🎬 **Title:** {title}\n"
-            f"📅 **Release Date:** {release}\n"
-            f"⭐ **Rating:** {rating}/10\n"
-            f"🎭 **Top Cast:** {actors}\n"
-            f"💰 **Box Office:** {revenue_str}\n\n"
-            f"📝 **Overview:**\n{overview[:2500]}"
-        )
+    revenue_str = f"${revenue:,}" if isinstance(revenue, (int, float)) and revenue > 0 else "Not Available"
 
-        return info[:4000]
+    info = (
+        f"🎬 <b>Title:</b> {title}\n"
+        f"📅 <b>Release Date:</b> {release}\n"
+        f"⭐ <b>Rating:</b> {rating}/10\n"
+        f"🎭 <b>Top Cast:</b> {actors}\n"
+        f"💰 <b>Box Office:</b> {revenue_str}\n\n"
+        f"📝 <b>Overview:</b>\n{overview[:2500]}"
+    )
+
+    return info[:4000]

@@ -19,6 +19,7 @@ from AnnieXMedia.misc import db
 from AnnieXMedia.utils.database import (
     get_active_chats,
     get_assistant,
+    get_cmode,
     get_lang,
     is_active_chat,
     is_music_playing,
@@ -43,10 +44,15 @@ def parse_chat_info(chat_info: str):
     return int(chat_info), None
 
 
-@app.on_callback_query(filters.regex("unban_assistant"))
-async def unban_assistant(_, callback: CallbackQuery):
+@app.on_callback_query(filters.regex("unban_assistant") & ~BANNED_USERS)
+@ActualAdminCB
+async def unban_assistant(_, callback: CallbackQuery, _lang):
+    if not callback.message or not callback.message.chat:
+        return
     chat_id = callback.message.chat.id
     userbot = await get_assistant(chat_id)
+    if not userbot or not getattr(userbot, "id", None):
+        return await callback.answer("Assistant unavailable.", show_alert=True)
     try:
         await app.unban_chat_member(chat_id, userbot.id)
         await callback.answer(
@@ -63,9 +69,21 @@ async def unban_assistant(_, callback: CallbackQuery):
 @app.on_callback_query(filters.regex("stream_admin") & ~BANNED_USERS)
 @ActualAdminCB
 async def manage_callback(client, callback: CallbackQuery, _):
-    data = callback.data.strip().split(None, 1)[1]
-    command, chat_info = data.split("|", 1)
-    chat_id, counter = parse_chat_info(chat_info)
+    parts = (callback.data or "").strip().split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return
+    command, chat_info = parts[1].split("|", 1)
+    try:
+        chat_id, counter = parse_chat_info(chat_info)
+    except ValueError:
+        return
+    msg_chat_id = callback.message.chat.id if callback.message and callback.message.chat else 0
+    allowed_chats = {msg_chat_id}
+    cmode_chat = await get_cmode(msg_chat_id)
+    if cmode_chat:
+        allowed_chats.add(cmode_chat)
+    if chat_id not in allowed_chats:
+        return await callback.answer("Unauthorized chat control.", show_alert=True)
     if not await is_active_chat(chat_id):
         return await callback.answer(_["general_5"], show_alert=True)
     user_mention = callback.from_user.mention if callback.from_user else "Admin"
@@ -121,6 +139,19 @@ async def manage_callback(client, callback: CallbackQuery, _):
         await handle_seek(callback, _, chat_id, command, user_mention)
 
 
+async def _update_stream_card(callback: CallbackQuery, text_msg: str, reply_markup=None):
+    try:
+        if callback.message and (callback.message.photo or callback.message.video):
+            await callback.edit_message_caption(caption=text_msg, reply_markup=reply_markup)
+        else:
+            await callback.edit_message_text(text_msg, reply_markup=reply_markup)
+    except Exception:
+        try:
+            await callback.message.reply_text(text_msg, reply_markup=reply_markup)
+        except Exception:
+            pass
+
+
 async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: str, user_mention: str):
     playlist = db.get(chat_id)
 
@@ -134,26 +165,26 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             if popped:
                 await auto_clean(popped)
             if not playlist:
-                await callback.edit_message_text(text_msg)
-                await callback.message.reply_text(
-                    _["admin_6"].format(user_mention, callback.message.chat.title),
-                    reply_markup=close_markup(_)
-                )
+                await callback.answer()
+                await _update_stream_card(callback, text_msg)
+                try:
+                    await callback.message.reply_text(
+                        _["admin_6"].format(user_mention, callback.message.chat.title or "Chat"),
+                        reply_markup=close_markup(_),
+                    )
+                except Exception:
+                    pass
                 return await StreamController.stop_stream(chat_id)
         except Exception:
-            await callback.edit_message_text(text_msg)
-            await callback.message.reply_text(
-                _["admin_6"].format(user_mention, callback.message.chat.title),
-                reply_markup=close_markup(_)
-            )
+            await _update_stream_card(callback, text_msg)
             return await StreamController.stop_stream(chat_id)
     else:
-        text_msg = f"➻ sᴛʀᴇᴀᴍ sᴋɪᴩᴩᴇᴅ 🎄\n│ \n└ʙʏ : {user_mention} 🥀"
-
-    await callback.answer()
+        text_msg = f"➻ sᴛʀᴇᴀᴍ ʀᴇᴩʟᴀʏᴇᴅ 🔁\n│ \n└ʙʏ : {user_mention} 🥀"
 
     if len(playlist) == 0:
         return await callback.answer(_["queue_2"], show_alert=True)
+
+    await callback.answer()
 
     current_track = playlist[0]
     queued = current_track["file"]
@@ -195,7 +226,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "tg"
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _update_stream_card(callback, text_msg, close_markup(_))
 
     elif "vid_" in queued:
         mystic = await callback.message.reply_text(_["call_7"], link_preview_options=LinkPreviewOptions(is_disabled=True))
@@ -220,7 +251,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "stream"
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _update_stream_card(callback, text_msg, close_markup(_))
         await mystic.delete()
 
     elif "index_" in queued:
@@ -236,7 +267,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         )
         db[chat_id][0]["mystic"] = run
         db[chat_id][0]["markup"] = "tg"
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _update_stream_card(callback, text_msg, close_markup(_))
 
     else:
         if videoid in ["telegram", "soundcloud"]:
@@ -278,10 +309,12 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             )
             db[chat_id][0]["mystic"] = run
             db[chat_id][0]["markup"] = "stream"
-        await callback.edit_message_text(text_msg, reply_markup=close_markup(_))
+        await _update_stream_card(callback, text_msg, close_markup(_))
 
 
 async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, user_mention: str):
+    if command not in ("1", "2", "3", "4"):
+        return await callback.answer("Invalid seek command.", show_alert=True)
     playing = db.get(chat_id)
     if not playing or len(playing) == 0:
         return await callback.answer(_["queue_2"], show_alert=True)
@@ -368,7 +401,8 @@ async def markup_timer():
                         seconds_to_min(playing[0]["played"]),
                         playing[0]["dur"],
                     )
-                    await mystic.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
+                    if buttons:
+                        await mystic.edit_reply_markup(reply_markup=InlineKeyboardMarkup(buttons))
                 except Exception:
                     continue
             except Exception:
@@ -378,16 +412,19 @@ async def markup_timer():
 asyncio.create_task(markup_timer())
 
 
-@app.on_callback_query(filters.regex("close") & ~BANNED_USERS)
+@app.on_callback_query(filters.regex(r"^(?:close|close_data)$") & ~BANNED_USERS)
 async def close_menu(_, query: CallbackQuery):
     try:
         await query.answer()
+        if not query.message:
+            return
+        chat = query.message.chat
         await query.message.delete()
         user_mention = query.from_user.mention if query.from_user else "Admin"
-        msg = await query.message.reply_text(f"✅ ᴄʟᴏꜱᴇᴅ ʙʏ : {user_mention}")
+        msg = await app.send_message(chat.id, f"✅ ᴄʟᴏꜱᴇᴅ ʙʏ : {user_mention}")
         await asyncio.sleep(2)
         await msg.delete()
-    except:
+    except Exception:
         pass
 
 
@@ -405,5 +442,5 @@ async def stop_download(_, query: CallbackQuery, _lang):
         await query.answer(_lang["tg_6"], show_alert=True)
         user_mention = query.from_user.mention if query.from_user else "Admin"
         return await query.edit_message_text(_lang["tg_7"].format(user_mention))
-    except:
+    except Exception:
         return await query.answer(_lang["tg_8"], show_alert=True)

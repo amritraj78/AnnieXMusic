@@ -1,12 +1,12 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 import os
 import shutil
 import socket
 import sys
 from datetime import datetime
 
-import urllib3
 from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError
 from pyrogram import filters
@@ -14,7 +14,7 @@ from pyrogram.types import LinkPreviewOptions
 
 import config
 from AnnieXMedia import app
-from AnnieXMedia.misc import HAPP, SUDOERS, XCB
+from AnnieXMedia.misc import HAPP, SUDOERS
 from AnnieXMedia.utils.database import (
     get_active_chats,
     remove_active_chat,
@@ -22,14 +22,16 @@ from AnnieXMedia.utils.database import (
 )
 from AnnieXMedia.utils.decorators.language import language
 from AnnieXMedia.utils.pastebin import ANNIEBIN
+from AnnieXMedia.utils.security import redact_secrets
 
-urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 async def is_heroku():
-    return "heroku" in socket.getfqdn()
+    fqdn = await asyncio.to_thread(socket.getfqdn)
+    return "heroku" in fqdn
+
 
 def cleanup_storage():
-    folders_to_clean = ["downloads", "raw_files", "cache"]
+    folders_to_clean = ["downloads", "raw_files", "cache", "playback"]
     for folder in folders_to_clean:
         if os.path.exists(folder):
             for item in os.listdir(folder):
@@ -44,13 +46,12 @@ def cleanup_storage():
         else:
             os.makedirs(folder, exist_ok=True)
 
-    for root, dirs, files in os.walk("."):
-        for d in dirs:
-            if d == "__pycache__":
-                try:
-                    shutil.rmtree(os.path.join(root, d))
-                except:
-                    pass
+
+def _git_collect_updates(branch: str):
+    repo = Repo()
+    remote_url = redact_secrets(repo.remotes.origin.url).split(".git")[0]
+    commits = list(repo.iter_commits(f"HEAD..origin/{branch}"))
+    return remote_url, commits
 
 
 @app.on_message(filters.command(["getlog", "logs", "getlogs"]) & SUDOERS)
@@ -58,20 +59,19 @@ def cleanup_storage():
 async def log_(client, message, _):
     try:
         await message.reply_document(document="log.txt")
-    except:
+    except Exception:
         await message.reply_text(_["server_1"])
 
 
 @app.on_message(filters.command(["update", "gitpull"]) & SUDOERS)
 @language
 async def update_(client, message, _):
-    if await is_heroku():
-        if HAPP is None:
-            return await message.reply_text(_["server_2"])
+    if await is_heroku() and HAPP is None:
+        return await message.reply_text(_["server_2"])
 
     response = await message.reply_text(_["server_3"])
     try:
-        repo = Repo()
+        await asyncio.to_thread(Repo)
     except GitCommandError:
         return await response.edit(_["server_4"])
     except InvalidGitRepositoryError:
@@ -80,28 +80,28 @@ async def update_(client, message, _):
     fetch_proc = await asyncio.create_subprocess_exec(
         "git", "fetch", "origin", config.UPSTREAM_BRANCH,
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL
+        stderr=asyncio.subprocess.DEVNULL,
     )
     await fetch_proc.communicate()
 
-    verification = ""
-    REPO_ = repo.remotes.origin.url.split(".git")[0]
-    for checks in repo.iter_commits(f"HEAD..origin/{config.UPSTREAM_BRANCH}"):
-        verification = str(checks.count())
-
-    if verification == "":
+    repo_url, commits = await asyncio.to_thread(_git_collect_updates, config.UPSTREAM_BRANCH)
+    if not commits:
         return await response.edit(_["server_6"])
 
-    updates = ""
-    ordinal = lambda format: "%d%s" % (
-        format,
-        "tsnrhtdd"[(format // 10 % 10 != 1) * (format % 10 < 4) * format % 10 :: 4],
+    ordinal = lambda num: "%d%s" % (
+        num,
+        "tsnrhtdd"[(num // 10 % 10 != 1) * (num % 10 < 4) * num % 10 :: 4],
     )
-    for info in repo.iter_commits(f"HEAD..origin/{config.UPSTREAM_BRANCH}"):
+    updates = ""
+    safe_repo = html.escape(repo_url, quote=True)
+    for info in commits:
+        dt = datetime.fromtimestamp(info.committed_date)
+        summary = html.escape(str(info.summary))
+        author = html.escape(str(info.author))
         updates += (
-            f"<b>\u2793 #{info.count()}: <a href={REPO_}/commit/{info}>{info.summary}</a> ʙʏ -> {info.author}</b>\n"
-            f"\t\t\t\t<b>\u279e ᴄᴏᴍᴍɪᴛᴇᴅ ᴏɴ :</b> {ordinal(int(datetime.fromtimestamp(info.committed_date).strftime('%d')))} "
-            f"{datetime.fromtimestamp(info.committed_date).strftime('%b')}, {datetime.fromtimestamp(info.committed_date).strftime('%Y')}\n\n"
+            f"<b>\u2793 #{info.count()}: <a href=\"{safe_repo}/commit/{info}\">{summary}</a> ʙʏ -> {author}</b>\n"
+            f"\t\t\t\t<b>\u279e ᴄᴏᴍᴍɪᴛᴇᴅ ᴏɴ :</b> {ordinal(int(dt.strftime('%d')))} "
+            f"{dt.strftime('%b')}, {dt.strftime('%Y')}\n\n"
         )
 
     _update_response_ = (
@@ -119,12 +119,14 @@ async def update_(client, message, _):
             f"<u><b>ᴜᴩᴅᴀᴛᴇs :</b></u>\n\n<a href={url}>ᴄʜᴇᴄᴋ ᴜᴩᴅᴀᴛᴇs</a>"
         )
     else:
-        nrs = await response.edit(_final_updates_, link_preview_options=LinkPreviewOptions(is_disabled=True))
+        nrs = await response.edit(
+            _final_updates_, link_preview_options=LinkPreviewOptions(is_disabled=True)
+        )
 
     pull_proc = await asyncio.create_subprocess_exec(
         "git", "pull",
         stdout=asyncio.subprocess.DEVNULL,
-        stderr=asyncio.subprocess.DEVNULL
+        stderr=asyncio.subprocess.DEVNULL,
     )
     await pull_proc.communicate()
 
@@ -135,28 +137,25 @@ async def update_(client, message, _):
                 await app.send_message(chat_id=int(x), text=_["server_8"].format(app.mention))
                 await remove_active_chat(x)
                 await remove_active_video_chat(x)
-            except:
+            except Exception:
                 pass
         await response.edit(f"{nrs.text}\n\n{_['server_7']}")
-    except:
+    except Exception:
         pass
 
-    cleanup_storage()
+    await asyncio.to_thread(cleanup_storage)
 
-    if await is_heroku():
+    if await is_heroku() and HAPP is not None:
         try:
-            os.system(
-                f"{XCB[5]} {XCB[7]} {XCB[9]}{XCB[4]}{XCB[0]*2}{XCB[6]}{XCB[4]}{XCB[8]}{XCB[1]}{XCB[5]}{XCB[2]}{XCB[6]}{XCB[2]}{XCB[3]}{XCB[0]}{XCB[10]}{XCB[2]}{XCB[5]} {XCB[11]}{XCB[4]}{XCB[12]}"
-            )
+            await asyncio.to_thread(HAPP.restart)
             return
         except Exception as err:
             await response.edit(f"{nrs.text}\n\n{_['server_9']}")
             return await app.send_message(
                 chat_id=config.LOGGER_ID,
-                text=_["server_10"].format(err),
+                text=_["server_10"].format(html.escape(redact_secrets(str(err)))),
             )
-    else:
-        os.execv(sys.executable, [sys.executable, "-m", "AnnieXMedia"])
+    os.execv(sys.executable, [sys.executable, "-m", "AnnieXMedia"])
 
 
 @app.on_message(filters.command(["restart"]) & SUDOERS)
@@ -171,10 +170,10 @@ async def restart_(_, message):
             )
             await remove_active_chat(x)
             await remove_active_video_chat(x)
-        except:
+        except Exception:
             pass
 
-    cleanup_storage()
+    await asyncio.to_thread(cleanup_storage)
 
     await response.edit_text(
         "» ʀᴇsᴛᴀʀᴛ ᴘʀᴏᴄᴇss sᴛᴀʀᴛᴇᴅ, ᴘʟᴇᴀsᴇ ᴡᴀɪᴛ ғᴏʀ ғᴇᴡ sᴇᴄᴏɴᴅs ᴜɴᴛɪʟ ᴛʜᴇ ʙᴏᴛ sᴛᴀʀᴛs..."

@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import os
 import tempfile
 import inspect
@@ -40,8 +41,12 @@ async def download_sticker(client, message):
     st = message.reply_to_message.sticker
     if not st:
         return await proc.edit("Please reply to a sticker.")
+    if (st.file_size or 0) > 20 * 1024 * 1024:
+        return await proc.edit("❌ Sticker exceeds 20 MB limit.")
     with tempfile.TemporaryDirectory() as td:
         path = await message.reply_to_message.download(os.path.join(td, "st"))
+        if not path or not os.path.exists(path):
+            return await proc.edit("❌ Failed to download sticker.")
         if st.is_animated:
             await proc.edit("➣ sending .tgs…")
             await client.send_document(message.chat.id, path, caption="here's your animated sticker!")
@@ -51,10 +56,15 @@ async def download_sticker(client, message):
         else:
             await proc.edit("➣ converting to png…")
             out = f"{path}.png"
-            with Image.open(path) as img:
-                img.save(out, "PNG")
+            def _to_png():
+                with Image.open(path) as img:
+                    img.save(out, "PNG")
+            await asyncio.to_thread(_to_png)
             await client.send_photo(message.chat.id, out, caption="here's your static image!")
-    await proc.delete()
+    try:
+        await proc.delete()
+    except Exception:
+        pass
 
 
 @app.on_message(filters.command("packkang") & filters.reply)
@@ -65,18 +75,20 @@ async def pack_clone(client, message):
     st = message.reply_to_message.sticker
     if not st or not st.set_name:
         return await proc.edit("Please reply to a sticker from a sticker pack.")
-    st = message.reply_to_message.sticker
     try:
         sset = await client.invoke(
             raw.functions.messages.GetStickerSet(
                 stickerset=raw.types.InputStickerSetShortName(short_name=st.set_name), hash=0
             )
         )
-        title = message.command[1] if len(message.command) > 1 else f"{message.from_user.first_name}'s pack"
-        bot_u = BOT_USERNAME.lstrip("@")
+        raw_title = message.command[1] if len(message.command) > 1 else f"{message.from_user.first_name}'s pack"
+        title = raw_title[:64]
+        bot_u = BOT_USERNAME.lstrip("@").lower()
         short = f"pack_{uuid4().hex[:8]}_by_{bot_u}"
         items = []
         for doc in sset.documents:
+            if not isinstance(doc, raw.types.Document):
+                continue
             emoji = next((a.alt for a in doc.attributes if isinstance(a, raw.types.DocumentAttributeSticker)), "🤔")
             items.append(
                 raw.types.InputStickerSetItem(

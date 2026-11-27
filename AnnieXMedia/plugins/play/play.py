@@ -26,6 +26,7 @@ from AnnieXMedia.utils.inline import (
     track_markup,
 )
 from AnnieXMedia.utils.logger import play_logs
+from AnnieXMedia.utils.security import is_safe_http_url
 from AnnieXMedia.utils.stream.stream import stream
 
 
@@ -238,6 +239,8 @@ async def play_command(
                     details, track_id = await Spotify.track(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not track_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 img = details["thumb"]
                 cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -249,6 +252,8 @@ async def play_command(
                     details, plist_id = await Spotify.playlist(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not plist_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 plist_type = "spplay"
                 img = config.SPOTIFY_PLAYLIST_IMG_URL
@@ -261,6 +266,8 @@ async def play_command(
                     details, plist_id = await Spotify.album(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not plist_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 plist_type = "spalbum"
                 img = config.SPOTIFY_ALBUM_IMG_URL
@@ -273,10 +280,12 @@ async def play_command(
                     details, plist_id = await Spotify.artist(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not plist_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 plist_type = "spartist"
                 img = config.SPOTIFY_ARTIST_IMG_URL
-                cap = _["play_11"].format(message.from_user.first_name)
+                cap = _["play_11"].format(app.mention, message.from_user.mention)
                 internal_type = "playlist"
                 log_label = "Spotify artist"
 
@@ -289,6 +298,8 @@ async def play_command(
                     details, track_id = await Apple.track(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not track_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 img = details["thumb"]
                 cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -301,6 +312,8 @@ async def play_command(
                     details, plist_id = await Apple.playlist(url)
                 except Exception as e:
                     return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+                if not details or not plist_id:
+                    return await mystic.edit_text(_["play_3"])
 
                 plist_type = "apple"
                 img = config.PLAYLIST_IMG_URL
@@ -316,6 +329,8 @@ async def play_command(
                 details, track_id = await Resso.track(url)
             except Exception as e:
                 return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+            if not details or not track_id:
+                return await mystic.edit_text(_["play_3"])
 
             img = details["thumb"]
             cap = _["play_10"].format(details["title"], details["duration_min"])
@@ -327,6 +342,8 @@ async def play_command(
                 details, track_path = await SoundCloud.download(url)
             except Exception as e:
                 return await mystic.edit_text(f"{_['play_3']}\nʀᴇᴀsᴏɴ: {e}")
+            if not details or not track_path:
+                return await mystic.edit_text(_["play_3"])
 
             if details["duration_sec"] > config.DURATION_LIMIT:
                 return await mystic.edit_text(
@@ -358,6 +375,8 @@ async def play_command(
             return await mystic.delete()
 
         else:
+            if not await is_safe_http_url(url):
+                return await mystic.edit_text("❌ Invalid or restricted stream URL.")
             try:
                 await StreamController.stream_call(url)
             except NoActiveGroupCall:
@@ -463,6 +482,9 @@ async def play_command(
             ran_hash = "".join(
                 random.choices(string.ascii_uppercase + string.digits, k=10)
             )
+            if len(lyrical) > 2048:
+                for k in list(lyrical.keys())[:512]:
+                    lyrical.pop(k, None)
             lyrical[ran_hash] = plist_id
             buttons = playlist_markup(
                 _,
@@ -473,7 +495,7 @@ async def play_command(
                 "f" if fplay else "d",
             )
             await mystic.delete()
-            photo_target = details["thumb"] if plist_type == "yt" else img
+            photo_target = img
             try:
                 await message.reply_photo(
                     photo=photo_target,
@@ -568,6 +590,8 @@ async def play_music(client, CallbackQuery, _):
             return await CallbackQuery.answer(_["playcb_1"], show_alert=True)
 
         chat_id, channel = await get_channeplayCB(_, cplay, CallbackQuery)
+        if not chat_id:
+            return
 
         user_name = CallbackQuery.from_user.first_name
         await CallbackQuery.message.delete()
@@ -603,7 +627,7 @@ async def play_music(client, CallbackQuery, _):
                 CallbackQuery.from_user.id,
                 mode,
                 "c" if cplay == "c" else "g",
-                "f" if fplay else "d",
+                "f" if fplay == "f" else "d",
             )
             return await mystic.edit_text(
                 _["play_13"], reply_markup=InlineKeyboardMarkup(buttons)
@@ -663,6 +687,8 @@ async def play_playlists_command(client, CallbackQuery, _):
             return await CallbackQuery.answer(_["playcb_1"], show_alert=True)
 
         chat_id, channel = await get_channeplayCB(_, cplay, CallbackQuery)
+        if not chat_id:
+            return
         user_name = CallbackQuery.from_user.first_name
         await CallbackQuery.message.delete()
         await CallbackQuery.answer()
@@ -683,6 +709,8 @@ async def play_playlists_command(client, CallbackQuery, _):
             )
 
         videoid = lyrical.get(videoid)
+        if not videoid:
+            return await mystic.edit_text(_["play_3"])
         video = mode == "v"
         forceplay = fplay == "f"
         spotify = True
@@ -698,23 +726,25 @@ async def play_playlists_command(client, CallbackQuery, _):
             internal_type = "playlist"
             log_label = "Youtube playlist"
         elif ptype == "spplay":
-            result, _ = await Spotify.playlist(videoid)
+            result, _pid = await Spotify.playlist(videoid)
             internal_type = "playlist"
             log_label = "Spotify playlist"
         elif ptype == "spalbum":
-            result, _ = await Spotify.album(videoid)
+            result, _pid = await Spotify.album(videoid)
             internal_type = "playlist"
             log_label = "Spotify album"
         elif ptype == "spartist":
-            result, _ = await Spotify.artist(videoid)
+            result, _pid = await Spotify.artist(videoid)
             internal_type = "playlist"
             log_label = "Spotify artist"
         elif ptype == "apple":
-            result, _ = await Apple.playlist(videoid, True)
+            result, _pid = await Apple.playlist(videoid, True)
             internal_type = "playlist"
             log_label = "Apple Music playlist"
         else:
             return
+        if not result:
+            return await mystic.edit_text(_["play_3"])
 
         await stream(
             _,
@@ -748,7 +778,8 @@ async def play_playlists_command(client, CallbackQuery, _):
 async def slider_queries(client, CallbackQuery, _):
     try:
         callback_data = CallbackQuery.data.split(None, 1)[1]
-        what, rtype, query, user_id, cplay, fplay = callback_data.split("|")
+        what, rtype, query_tok, user_id, cplay, fplay = callback_data.split("|")
+        real_query = lyrical.get(query_tok, query_tok)
 
         if CallbackQuery.from_user.id != int(user_id):
             return await CallbackQuery.answer(_["playcb_1"], show_alert=True)
@@ -762,10 +793,10 @@ async def slider_queries(client, CallbackQuery, _):
             query_type = 9
 
         title, duration_min, thumbnail, vidid = await YouTube.slider(
-            query, query_type
+            real_query, query_type
         )
 
-        buttons = slider_markup(_, vidid, user_id, query, query_type, cplay, fplay)
+        buttons = slider_markup(_, vidid, user_id, query_tok, query_type, cplay, fplay)
         med = InputMediaPhoto(
             media=thumbnail,
             caption=_["play_10"].format(

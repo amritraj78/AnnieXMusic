@@ -1,6 +1,6 @@
 # Authored By Certified Coders © 2025
 import html
-import random
+import secrets
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton
 from AnnieXMedia import app
@@ -16,7 +16,7 @@ async def password(bot, message):
     if len(message.command) > 1:
         input_length = message.text.split(" ", 1)[1]
     else:
-        input_length = random.choice(["5", "6", "7", "8", "9", "10", "12", "14"])
+        input_length = secrets.choice(["5", "6", "7", "8", "9", "10", "12", "14"])
 
     try:
         length = int(input_length)
@@ -25,7 +25,7 @@ async def password(bot, message):
     except ValueError:
         return await processing.edit_text("Please enter a valid positive number for the password length (1-128).")
 
-    generated_password = "".join(random.choices(characters, k=length))
+    generated_password = "".join(secrets.choice(characters) for _ in range(length))
 
     reply_text = (
         f"<b>Lɪᴍɪᴛ:</b> {length}\n"

@@ -60,57 +60,43 @@ async def _resolve_user(client: Client, identifier: str | int) -> Optional[User]
         return None
 
 
-async def extract_user_and_reason(
+async def _extract_user_and_tail(
     message: Message, client: Client
 ) -> Tuple[Optional[int], Optional[str], Optional[str]]:
-    """
-    Accepts:
-      • reply
-      • `/cmd @user | id [reason ...]`
-    Returns (user_id, first_name, reason)
-    """
+    raw_text = (message.text or message.caption or "").strip()
     if message.reply_to_message:
         target_user = message.reply_to_message.from_user
         if not target_user:
             await message.reply_text("Cannot perform action on channel or anonymous message.")
             return None, None, None
-        reason = message.text.split(None, 1)[1] if len(message.command) > 1 else None
+        parts = raw_text.split(None, 1)
+        tail = parts[1].strip() if len(parts) > 1 else None
     else:
-        if len(message.command) < 2:
+        if len(message.command or []) < 2:
             await message.reply_text("Specify a user or reply to someone.")
             return None, None, None
         target_user = await _resolve_user(client, message.command[1])
         if not target_user:
             await message.reply_text("I can’t find that user.")
             return None, None, None
-        reason = message.text.partition(message.command[1])[2].strip() or None
+        parts = raw_text.split(None, 2)
+        tail = parts[2].strip() if len(parts) > 2 else None
 
-    return target_user.id, target_user.first_name, reason
+    return target_user.id, target_user.first_name, (tail or None)
+
+
+async def extract_user_and_reason(
+    message: Message, client: Client
+) -> Tuple[Optional[int], Optional[str], Optional[str]]:
+    """Return (user_id, first_name, reason) from reply or `/cmd @user|id [reason]`."""
+    return await _extract_user_and_tail(message, client)
 
 
 async def extract_user_and_title(
     message: Message, client: Client
 ) -> Tuple[Optional[int], Optional[str], Optional[str]]:
-    """
-    For /promote variants → returns (user_id, first_name, title)
-    """
-    if message.reply_to_message:
-        target_user = message.reply_to_message.from_user
-        if not target_user:
-            await message.reply_text("Cannot perform action on channel or anonymous message.")
-            return None, None, None
-        title = message.text.split(None, 1)[1] if len(message.command) > 1 else None
-    else:
-        if len(message.command) < 2:
-            await message.reply_text("Specify a user or reply to someone.")
-            return None, None, None
-        target_user = await _resolve_user(client, message.command[1])
-        if not target_user:
-            await message.reply_text("I can’t find that user.")
-            return None, None, None
-        title = message.text.partition(message.command[1])[2].strip() or None
-
-    return target_user.id, target_user.first_name, title
+    """Return (user_id, first_name, title) for promote commands."""
+    return await _extract_user_and_tail(message, client)
 
 
 # ────────────────────────────────────────────────────────────

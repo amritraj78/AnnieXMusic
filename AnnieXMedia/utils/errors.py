@@ -13,6 +13,7 @@ from AnnieXMedia import app
 from config import LOGGER_ID, DEBUG_IGNORE_LOG
 from AnnieXMedia.utils.exceptions import is_ignored_error
 from AnnieXMedia.utils.pastebin import ANNIEBIN
+from AnnieXMedia.utils.security import redact_secrets
 
 
 DEBUG_LOG_FILE = "ignored_errors.log"
@@ -22,8 +23,9 @@ MAX_DEBUG_LOG_BYTES = 5 * 1024 * 1024  # 5 MB cap for Koyeb ephemeral disk
 # ========== Paste Fallback ==========
 
 async def send_large_error(text: str, caption: str, filename: str):
+    clean_text = redact_secrets(text)
     try:
-        paste_url = await ANNIEBIN(text)
+        paste_url = await ANNIEBIN(clean_text)
         if paste_url:
             await app.send_message(LOGGER_ID, f"{caption}\n\n🔗 Paste: {paste_url}")
             return
@@ -33,7 +35,7 @@ async def send_large_error(text: str, caption: str, filename: str):
     path = f"{filename}.txt"
     try:
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
-            await f.write(text)
+            await f.write(clean_text)
         await app.send_document(LOGGER_ID, path, caption="❌ Error Log (Fallback)")
     except Exception:
         pass
@@ -55,19 +57,20 @@ def format_traceback(err, tb, label: str, extras: dict = None) -> str:
     ]
     if extras:
         parts.extend(
-            [f"📌 <b>{html.escape(str(k))}:</b> <code>{html.escape(str(v))}</code>" for k, v in extras.items()]
+            [f"📌 <b>{html.escape(str(k))}:</b> <code>{html.escape(redact_secrets(str(v)))}</code>" for k, v in extras.items()]
         )
-    parts.append(f"\n<b>Traceback:</b>\n<pre>{html.escape(str(tb))}</pre>")
+    parts.append(f"\n<b>Traceback:</b>\n<pre>{html.escape(redact_secrets(str(tb)))}</pre>")
     return "\n".join(parts)
 
 async def handle_trace(err, tb, label, filename, extras=None):
+    clean_tb = redact_secrets(str(tb))
     if is_ignored_error(err):
-        await log_ignored_error(err, tb, label, extras)
+        await log_ignored_error(err, clean_tb, label, extras)
         return
 
-    caption = format_traceback(err, tb, label, extras)
+    caption = format_traceback(err, clean_tb, label, extras)
     if len(caption) > 4096:
-        await send_large_error(tb, caption.split("\n\n")[0], filename)
+        await send_large_error(clean_tb, caption.split("\n\n")[0], filename)
     else:
         try:
             await app.send_message(LOGGER_ID, caption)

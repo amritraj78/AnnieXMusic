@@ -54,25 +54,33 @@ async def langs_command(client, message: Message, _):
         await message.reply_text(_["lang_1"], reply_markup=keyboard)
 
 
-@app.on_callback_query(filters.regex("LG") & ~BANNED_USERS)
+@app.on_callback_query(filters.regex(r"^(?:LG|LANGUAGE_SETTINGS)$") & ~BANNED_USERS)
 @languageCB
 async def languagecb(client, CallbackQuery: CallbackQuery, _):
     try:
         await CallbackQuery.answer()
-    except:
+    except Exception:
         pass
+    if not CallbackQuery.message:
+        return
     keyboard = languages_keyboard(_)
     try:
         await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
     except FloodWait as e:
         await asyncio.sleep(e.value)
         await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass
 
 
-@app.on_callback_query(filters.regex(r"languages:(.*?)") & ~BANNED_USERS)
+@app.on_callback_query(filters.regex(r"^languages:(.+)$") & ~BANNED_USERS)
 @ActualAdminCB
 async def language_markup(client, CallbackQuery: CallbackQuery, _):
-    lang_code = CallbackQuery.data.split(":")[1]
+    if not CallbackQuery.message:
+        return await CallbackQuery.answer()
+    lang_code = CallbackQuery.data.split(":", 1)[1]
+    if lang_code not in languages_present:
+        return await CallbackQuery.answer(_["lang_3"], show_alert=True)
     old_lang = await get_lang(CallbackQuery.message.chat.id)
     if str(old_lang) == str(lang_code):
         return await CallbackQuery.answer(_["lang_4"], show_alert=True)
@@ -80,7 +88,7 @@ async def language_markup(client, CallbackQuery: CallbackQuery, _):
     try:
         _ = get_string(lang_code)
         await CallbackQuery.answer(_["lang_2"], show_alert=True)
-    except:
+    except Exception:
         _ = get_string(old_lang)
         return await CallbackQuery.answer(_["lang_3"], show_alert=True)
 
@@ -91,3 +99,5 @@ async def language_markup(client, CallbackQuery: CallbackQuery, _):
     except FloodWait as e:
         await asyncio.sleep(e.value)
         await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+    except Exception:
+        pass

@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 import time
 from datetime import datetime
 from asyncio import sleep
@@ -27,7 +28,11 @@ async def groupdata_handler(client, message: Message):
     if not is_admin:
         warn = await message.reply_text("🚫 ONLY ADMINS CAN USE THIS!")
         await sleep(5)
-        return await warn.delete()
+        try:
+            await warn.delete()
+        except Exception:
+            pass
+        return
 
     status = await message.reply_text("🔍 Gathering group stats...")
 
@@ -89,7 +94,7 @@ async def groupdata_handler(client, message: Message):
     end_time = time.perf_counter()
     took = f"{end_time - start_time:.2f}"
     now = datetime.now().strftime("%d %b %Y • %H:%M")
-    title = message.chat.title or "This Group"
+    title = html.escape(message.chat.title or "This Group")
 
     text = (
         f"<b>📊 Group Data Report</b>\n"

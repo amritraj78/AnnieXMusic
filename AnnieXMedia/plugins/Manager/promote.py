@@ -16,7 +16,7 @@ import asyncio
 from typing import Optional
 
 from pyrogram import filters, enums
-from pyrogram.errors import ChatAdminRequired, UserAdminInvalid
+from pyrogram.errors import ChatAdminRequired, UserAdminInvalid, UserNotParticipant, RPCError
 from pyrogram.types import ChatAdministratorRights, Message
 
 from AnnieXMedia import app
@@ -110,7 +110,13 @@ async def promote_command(client, message: Message):
     if not uid:
         return
 
-    member = await client.get_chat_member(message.chat.id, uid)
+    try:
+        member = await client.get_chat_member(message.chat.id, uid)
+    except UserNotParticipant:
+        return await _info(message, "User is not a member of this chat.")
+    except RPCError as e:
+        return await _info(message, f"Failed to check user: {e}")
+
     if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
         return await _info(message, "User is already an admin or owner.")
 
@@ -123,13 +129,15 @@ async def promote_command(client, message: Message):
         if title:
             try:
                 await client.set_administrator_title(message.chat.id, uid, title)
-            except ValueError:
+            except (ValueError, RPCError):
                 title = "⚠️ Couldn’t set custom title (not a supergroup)"
         await message.reply_text(_format_success("Promoted", message, uid, name, title))
     except ChatAdminRequired:
         await message.reply_text("I need promote permissions.")
     except UserAdminInvalid:
         await message.reply_text("I cannot promote that user.")
+    except RPCError as e:
+        await message.reply_text(f"Failed to promote user: {e}")
 
 # ────────────────────────────────────────────────────────────
 # /fullpromote
@@ -144,7 +152,13 @@ async def fullpromote_command(client, message: Message):
     if not uid:
         return
 
-    member = await client.get_chat_member(message.chat.id, uid)
+    try:
+        member = await client.get_chat_member(message.chat.id, uid)
+    except UserNotParticipant:
+        return await _info(message, "User is not a member of this chat.")
+    except RPCError as e:
+        return await _info(message, f"Failed to check user: {e}")
+
     if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
         return await _info(message, "User is already an admin or owner.")
 
@@ -157,13 +171,15 @@ async def fullpromote_command(client, message: Message):
         if title:
             try:
                 await client.set_administrator_title(message.chat.id, uid, title)
-            except ValueError:
+            except (ValueError, RPCError):
                 title = "⚠️ Couldn’t set custom title (not a supergroup)"
         await message.reply_text(_format_success("Fully promoted", message, uid, name, title))
     except ChatAdminRequired:
         await message.reply_text("I need promote permissions.")
     except UserAdminInvalid:
         await message.reply_text("I cannot promote that user.")
+    except RPCError as e:
+        await message.reply_text(f"Failed to promote user: {e}")
 
 # ────────────────────────────────────────────────────────────
 # /demote
@@ -178,7 +194,13 @@ async def demote_command(client, message: Message):
     if not uid:
         return
 
-    member = await client.get_chat_member(message.chat.id, uid)
+    try:
+        member = await client.get_chat_member(message.chat.id, uid)
+    except UserNotParticipant:
+        return await _info(message, "User is not a member of this chat.")
+    except RPCError as e:
+        return await _info(message, f"Failed to check user: {e}")
+
     if member.status == enums.ChatMemberStatus.OWNER:
         return await _info(message, "I cannot demote the group owner.")
     if member.status != enums.ChatMemberStatus.ADMINISTRATOR:
@@ -195,6 +217,8 @@ async def demote_command(client, message: Message):
         await message.reply_text("I need promote permissions.")
     except UserAdminInvalid:
         await message.reply_text("I cannot demote that user.")
+    except RPCError as e:
+        await message.reply_text(f"Failed to demote user: {e}")
 
 # ────────────────────────────────────────────────────────────
 # /tempadmin
@@ -223,11 +247,17 @@ async def tempadmin_command(client, message: Message):
         title    = message.text.partition(time_arg)[2].strip() or None
 
     delta = parse_time(time_arg)
-    if not delta:
+    if not delta or delta.total_seconds() <= 0:
         return await message.reply_text("Invalid time format. Use s/m/h/d suffix.")
 
     uid, name = user.id, user.first_name
-    member = await client.get_chat_member(message.chat.id, uid)
+    try:
+        member = await client.get_chat_member(message.chat.id, uid)
+    except UserNotParticipant:
+        return await _info(message, "User is not a member of this chat.")
+    except RPCError as e:
+        return await _info(message, f"Failed to check user: {e}")
+
     if member.status in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
         return await _info(message, "User is already an admin or owner.")
 
@@ -240,13 +270,15 @@ async def tempadmin_command(client, message: Message):
         if title:
             try:
                 await client.set_administrator_title(message.chat.id, uid, title)
-            except ValueError:
+            except (ValueError, RPCError):
                 title = "⚠️ Couldn’t set custom title (not a supergroup)"
         await message.reply_text(_format_success(f"Temp‑promoted for {time_arg}", message, uid, name, title))
     except ChatAdminRequired:
         return await message.reply_text("I need promote permissions.")
     except UserAdminInvalid:
         return await message.reply_text("I cannot promote that user.")
+    except RPCError as e:
+        return await message.reply_text(f"Failed to promote user: {e}")
 
 
     async def _auto_demote():

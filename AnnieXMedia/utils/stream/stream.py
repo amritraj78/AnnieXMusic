@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 import os
 from random import randint
 from typing import Union
@@ -13,6 +14,7 @@ from AnnieXMedia.utils.database import add_active_video_chat, is_active_chat
 from AnnieXMedia.utils.exceptions import AssistantErr
 from AnnieXMedia.utils.inline import aq_markup, close_markup, stream_markup
 from AnnieXMedia.utils.pastebin import ANNIEBIN
+from AnnieXMedia.utils.security import is_safe_http_url
 from AnnieXMedia.utils.stream.queue import put_queue, put_queue_index
 from AnnieXMedia.utils.thumbnails import get_thumb
 from AnnieXMedia.utils.errors import capture_internal_err
@@ -129,8 +131,9 @@ async def stream(
                         text=stream_text,
                         reply_markup=InlineKeyboardMarkup(button),
                     )
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
+                if chat_id in db and db[chat_id]:
+                    db[chat_id][0]["mystic"] = run
+                    db[chat_id][0]["markup"] = "stream"
 
         if count == 0:
             return
@@ -238,8 +241,9 @@ async def stream(
                     text=stream_caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "stream"
+            if chat_id in db and db[chat_id]:
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "stream"
 
     elif streamtype == "soundcloud":
         file_path = result["filepath"]
@@ -300,8 +304,9 @@ async def stream(
                     text=sc_caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
+            if chat_id in db and db[chat_id]:
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "tg"
 
     elif streamtype == "telegram":
         file_path = result["path"]
@@ -363,8 +368,9 @@ async def stream(
                     text=tg_caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
+            if chat_id in db and db[chat_id]:
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "tg"
 
     elif streamtype == "live":
         link = result["link"]
@@ -441,11 +447,14 @@ async def stream(
                     text=live_caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
+            if chat_id in db and db[chat_id]:
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "tg"
 
     elif streamtype == "index":
-        link = result
+        link = str(result or "").strip()
+        if not await is_safe_http_url(link):
+            raise AssistantErr("Unsupported or unsafe stream URL.")
         title = "ɪɴᴅᴇx ᴏʀ ᴍ3ᴜ8 ʟɪɴᴋ"
         duration_min = "00:00"
 
@@ -501,6 +510,7 @@ async def stream(
                     text=idx_caption,
                     reply_markup=InlineKeyboardMarkup(button),
                 )
-            db[chat_id][0]["mystic"] = run
-            db[chat_id][0]["markup"] = "tg"
+            if chat_id in db and db[chat_id]:
+                db[chat_id][0]["mystic"] = run
+                db[chat_id][0]["markup"] = "tg"
             await mystic.delete()

@@ -2,20 +2,17 @@
 import asyncio
 import contextlib
 from io import BytesIO
+import aiohttp
 from pyrogram import Client, filters
 from pyrogram.types import Message
 from AnnieXMedia import app
-from httpx import AsyncClient, Timeout
+from AnnieXMedia.utils.downloader import get_http_session
 
-# -----------------------------------------------------------------
-def _get_fetch() -> AsyncClient:
-    return AsyncClient(
-        headers={
-            "Accept-Language": "id-ID",
-            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
-        },
-        timeout=Timeout(20),
-    )
+_QUOTE_HEADERS = {
+    "Accept-Language": "id-ID",
+    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/107.0.0.0 Safari/537.36",
+}
+_MAX_QUOTE_BYTES = 15 * 1024 * 1024
 # ------------------------------------------------------------------------
 class QuotlyException(Exception):
     pass
@@ -224,12 +221,23 @@ async def pyrogram_to_quotly(messages, is_reply):
             the_message_dict_to_append["replyMessage"] = {}
         payload["messages"].append(the_message_dict_to_append)
 
-    async with _get_fetch() as fetch:
-        r = await fetch.post("https://bot.lyo.su/quote/generate.png", json=payload)
-        if not r.is_error:
-            return r.read()
-        else:
-            raise QuotlyException(r.json())
+    session = await get_http_session()
+    async with session.post(
+        "https://bot.lyo.su/quote/generate.png",
+        json=payload,
+        headers=_QUOTE_HEADERS,
+        timeout=aiohttp.ClientTimeout(total=20),
+    ) as r:
+        if r.status < 400:
+            raw = await r.read()
+            if len(raw) > _MAX_QUOTE_BYTES:
+                raise QuotlyException("Generated quote exceeds size limit.")
+            return raw
+        try:
+            err_body = await r.json(content_type=None)
+        except Exception:
+            err_body = await r.text()
+        raise QuotlyException(err_body)
 # ------------------------------------------------------------------------------------------
 
 # Helper function to check if an argument is an integer
@@ -296,5 +304,6 @@ async def msg_quotly_cmd(self: Client, ctx: Message):
     except Exception as e:
         await ctx.reply_text(f"ERROR: {e}")
     finally:
-        await processing_msg.delete()
+        with contextlib.suppress(Exception):
+            await processing_msg.delete()
 # ---------------------------------------------------------------------------------

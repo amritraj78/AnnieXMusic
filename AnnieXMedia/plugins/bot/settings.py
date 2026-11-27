@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.errors import MessageNotModified
@@ -242,10 +243,10 @@ async def playmode_ans(client, callback: CallbackQuery, _):
         playty = await get_playtype(callback.message.chat.id)
         if playty == "Everyone":
             await set_playtype(callback.message.chat.id, "Admin")
-            Playtype = False
+            Playtype = True
         else:
             await set_playtype(callback.message.chat.id, "Everyone")
-            Playtype = True
+            Playtype = None
         playmode = await get_playmode(callback.message.chat.id)
         Direct = True if playmode == "Direct" else None
         is_non_admin = await is_nonadmin_chat(callback.message.chat.id)
@@ -278,20 +279,25 @@ async def authusers_mar(client, callback: CallbackQuery, _):
                 pass
             counter = 0
             await callback.edit_message_text(_["auth_6"])
-            msg = _["auth_7"].format(callback.message.chat.title)
+            msg = _["auth_7"].format(html.escape(callback.message.chat.title or "Chat"))
             for note in _authusers:
                 _note = await get_authuser(callback.message.chat.id, note)
-                user_id = _note["auth_user_id"]
-                admin_id = _note["admin_id"]
-                admin_name = _note["admin_name"]
+                if not isinstance(_note, dict):
+                    continue
+                user_id = _note.get("auth_user_id")
+                admin_id = _note.get("admin_id")
+                admin_name = html.escape(str(_note.get("admin_name") or "Admin"))
                 try:
                     user_obj = await app.get_users(user_id)
-                    user_name = user_obj.first_name
+                    user_name = html.escape(str(user_obj.first_name or "User"))
                     counter += 1
                 except Exception:
                     continue
-                msg += f"{counter}➤ {user_name}[<code>{user_id}</code>]\n"
-                msg += f"   {_['auth_8']} {admin_name}[<code>{admin_id}</code>]\n\n"
+                entry = f"{counter}➤ {user_name}[<code>{user_id}</code>]\n   {_['auth_8']} {admin_name}[<code>{admin_id}</code>]\n\n"
+                if len(msg) + len(entry) > 3950:
+                    msg += "<i>...list truncated</i>"
+                    break
+                msg += entry
             upl = InlineKeyboardMarkup(
                 [[
                     InlineKeyboardButton(text=_["BACK_BUTTON"], callback_data="AUTH_SETTINGS"),

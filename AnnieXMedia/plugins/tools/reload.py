@@ -57,14 +57,14 @@ async def restart_bot(client, message: Message, _):
     try:
         db[message.chat.id] = []
         await StreamController.force_stop_stream(message.chat.id)
-    except:
+    except Exception:
         pass
 
     userbot = await get_assistant(message.chat.id)
     if userbot:
         try:
             await userbot.resolve_peer(message.chat.username or message.chat.id)
-        except:
+        except Exception:
             pass
 
     chat_id = await get_cmode(message.chat.id)
@@ -76,7 +76,7 @@ async def restart_bot(client, message: Message, _):
                 await userbot.resolve_peer(got.username or chat_id)
             db[chat_id] = []
             await StreamController.force_stop_stream(chat_id)
-        except:
+        except Exception:
             pass
 
     await mystic.edit_text(_["reload_5"].format(app.mention))

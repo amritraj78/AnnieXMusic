@@ -1,5 +1,5 @@
 # Authored By Certified Coders © 2025
-from pyrogram.enums import ChatType
+from pyrogram.enums import ChatMemberStatus, ChatType
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 
 from AnnieXMedia import app
@@ -31,13 +31,13 @@ def AdminRightsCheck(mystic):
 
         try:
             await message.delete()
-        except:
+        except Exception:
             pass
 
         try:
             language = await get_lang(message.chat.id)
             _ = get_string(language)
-        except:
+        except Exception:
             _ = get_string("en")
         if message.sender_chat:
             upl = InlineKeyboardMarkup(
@@ -57,7 +57,7 @@ def AdminRightsCheck(mystic):
                 return await message.reply_text(_["setting_7"])
             try:
                 await app.get_chat(chat_id)
-            except:
+            except Exception:
                 return await message.reply_text(_["cplay_4"])
         else:
             chat_id = message.chat.id
@@ -71,7 +71,7 @@ def AdminRightsCheck(mystic):
                 if not admins:
                     return await message.reply_text(_["admin_13"])
                 else:
-                    if message.from_user.id not in admins:
+                    if not uid or uid not in admins:
                         if await is_skipmode(message.chat.id):
                             upvote = await get_upvote_count(chat_id)
                             text = f"""<b>ᴀᴅᴍɪɴ ʀɪɢʜᴛs ɴᴇᴇᴅᴇᴅ</b>
@@ -98,16 +98,19 @@ def AdminRightsCheck(mystic):
                             )
                             if chat_id not in confirmer:
                                 confirmer[chat_id] = {}
+                            elif len(confirmer[chat_id]) > 50:
+                                confirmer[chat_id].clear()
                             try:
                                 vidid = db[chat_id][0]["vidid"]
                                 file = db[chat_id][0]["file"]
-                            except:
+                            except Exception:
                                 return await message.reply_text(_["admin_14"])
                             senn = await message.reply_text(text, reply_markup=upl)
-                            confirmer[chat_id][senn.id] = {
-                                "vidid": vidid,
-                                "file": file,
-                            }
+                            if senn:
+                                confirmer[chat_id][senn.id] = {
+                                    "vidid": vidid,
+                                    "file": file,
+                                }
                             return
                         else:
                             return await message.reply_text(_["admin_14"])
@@ -128,13 +131,13 @@ def AdminActual(mystic):
 
         try:
             await message.delete()
-        except:
+        except Exception:
             pass
 
         try:
             language = await get_lang(message.chat.id)
             _ = get_string(language)
-        except:
+        except Exception:
             _ = get_string("en")
         if message.sender_chat:
             upl = InlineKeyboardMarkup(
@@ -152,14 +155,12 @@ def AdminActual(mystic):
             if not message.from_user:
                 return await message.reply_text(_["general_4"])
             try:
-                member = (
-                    await app.get_chat_member(message.chat.id, message.from_user.id)
-                ).privileges
-                if not member:
-                    return await message.reply_text(_["general_4"])
+                cmem = await app.get_chat_member(message.chat.id, message.from_user.id)
             except Exception:
                 return
-            if not member.can_manage_video_chats:
+            is_owner = cmem.status == ChatMemberStatus.OWNER
+            has_vc = bool(cmem.privileges and cmem.privileges.can_manage_video_chats)
+            if not (is_owner or has_vc):
                 return await message.reply(_["general_4"])
         return await mystic(client, message, _)
 
@@ -193,7 +194,10 @@ def ActualAdminCB(mystic):
                     CallbackQuery.message.chat.id,
                     CallbackQuery.from_user.id,
                 )
-                if mem and mem.privileges and mem.privileges.can_manage_video_chats:
+                if mem and (
+                    mem.status == ChatMemberStatus.OWNER
+                    or (mem.privileges and mem.privileges.can_manage_video_chats)
+                ):
                     has_vc_priv = True
             except Exception:
                 has_vc_priv = False

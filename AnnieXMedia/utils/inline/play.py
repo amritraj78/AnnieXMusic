@@ -1,9 +1,23 @@
 # Authored By Certified Coders © 2025
+import hashlib
 import time
 from pyrogram.types import InlineKeyboardButton
+import config
 from AnnieXMedia.utils.formatters import time_to_seconds
 
 LAST_UPDATE_TIME = {}
+
+
+def _slider_token(query: str) -> str:
+    """Map arbitrary UTF-8 query to a short fixed ASCII key inside config.lyrical."""
+    q = str(query or "")
+    tok = "sl_" + hashlib.sha1(q.encode("utf-8", errors="ignore")).hexdigest()[:10]
+    if len(config.lyrical) > 2048:
+        for k in list(config.lyrical.keys())[:512]:
+            if str(k).startswith("sl_"):
+                config.lyrical.pop(k, None)
+    config.lyrical[tok] = q
+    return tok
 
 
 def track_markup(_, videoid, user_id, channel, fplay):
@@ -31,6 +45,11 @@ def should_update_progress(chat_id):
     now = time.time()
     last = LAST_UPDATE_TIME.get(chat_id, 0)
     if now - last >= 6:
+        if len(LAST_UPDATE_TIME) > 4096:
+            cutoff = now - 300
+            for k, ts in list(LAST_UPDATE_TIME.items()):
+                if ts < cutoff:
+                    LAST_UPDATE_TIME.pop(k, None)
         LAST_UPDATE_TIME[chat_id] = now
         return True
     return False
@@ -116,7 +135,7 @@ def livestream_markup(_, videoid, user_id, mode, channel, fplay):
 
 
 def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
-    short_query = query[:20]
+    q_tok = query if str(query).startswith("sl_") and len(str(query)) <= 16 else _slider_token(query)
     return [
         [
             InlineKeyboardButton(
@@ -131,15 +150,15 @@ def slider_markup(_, videoid, user_id, query, query_type, channel, fplay):
         [
             InlineKeyboardButton(
                 text="◁",
-                callback_data=f"slider B|{query_type}|{short_query}|{user_id}|{channel}|{fplay}",
+                callback_data=f"slider B|{query_type}|{q_tok}|{user_id}|{channel}|{fplay}",
             ),
             InlineKeyboardButton(
                 text=_["CLOSE_BUTTON"],
-                callback_data=f"forceclose {short_query}|{user_id}",
+                callback_data=f"forceclose {q_tok}|{user_id}",
             ),
             InlineKeyboardButton(
                 text="▷",
-                callback_data=f"slider F|{query_type}|{short_query}|{user_id}|{channel}|{fplay}",
+                callback_data=f"slider F|{query_type}|{q_tok}|{user_id}|{channel}|{fplay}",
             ),
         ],
     ]

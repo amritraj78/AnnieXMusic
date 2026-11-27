@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+from typing import Optional
 from pyrogram import Client
 
 import config
@@ -14,59 +15,30 @@ GROUPS_TO_JOIN = [
 ]
 
 
-# Initialize userbots
+def _make_assistant(name: str, session_str: Optional[str]) -> Optional[Client]:
+    s = (session_str or "").strip()
+    if not s or s.lower() == "none":
+        return None
+    return Client(
+        name,
+        config.API_ID,
+        config.API_HASH,
+        session_string=s,
+        no_updates=True,
+        workers=4,
+    )
+
+
 class Userbot:
     def __init__(self):
-        self.one = Client(
-            "AnnieAssis1",
-            config.API_ID,
-            config.API_HASH,
-            session_string=str(config.STRING1),
-            no_updates=True,
-            workers=4,
-        )
-        self.two = Client(
-            "AnnieAssis2",
-            config.API_ID,
-            config.API_HASH,
-            session_string=str(config.STRING2),
-            no_updates=True,
-            workers=4,
-        )
-        self.three = Client(
-            "AnnieAssis3",
-            config.API_ID,
-            config.API_HASH,
-            session_string=str(config.STRING3),
-            no_updates=True,
-            workers=4,
-        )
-        self.four = Client(
-            "AnnieAssis4",
-            config.API_ID,
-            config.API_HASH,
-            session_string=str(config.STRING4),
-            no_updates=True,
-            workers=4,
-        )
-        self.five = Client(
-            "AnnieAssis5",
-            config.API_ID,
-            config.API_HASH,
-            session_string=str(config.STRING5),
-            no_updates=True,
-            workers=4,
-        )
+        self.one = _make_assistant("AnnieAssis1", config.STRING1)
+        self.two = _make_assistant("AnnieAssis2", config.STRING2)
+        self.three = _make_assistant("AnnieAssis3", config.STRING3)
+        self.four = _make_assistant("AnnieAssis4", config.STRING4)
+        self.five = _make_assistant("AnnieAssis5", config.STRING5)
 
-    async def start_assistant(self, client: Client, index: int):
-        string_attr = [
-            config.STRING1,
-            config.STRING2,
-            config.STRING3,
-            config.STRING4,
-            config.STRING5,
-        ][index - 1]
-        if not string_attr:
+    async def start_assistant(self, client: Optional[Client], index: int):
+        if client is None:
             return
 
         try:
@@ -77,7 +49,8 @@ class Userbot:
                 except Exception:
                     pass
 
-            assistants.append(index)
+            if index not in assistants:
+                assistants.append(index)
 
             try:
                 await client.send_message(
@@ -90,7 +63,8 @@ class Userbot:
 
             me = await client.get_me()
             client.id, client.name, client.username = me.id, me.first_name, me.username
-            assistantids.append(me.id)
+            if me.id not in assistantids:
+                assistantids.append(me.id)
 
             LOGGER(__name__).info(f"Assistant {index} Started as {client.name}")
 
@@ -99,22 +73,13 @@ class Userbot:
 
     async def start(self):
         LOGGER(__name__).info("Starting Annie's Assistants...")
-        await self.start_assistant(self.one, 1)
-        await self.start_assistant(self.two, 2)
-        await self.start_assistant(self.three, 3)
-        await self.start_assistant(self.four, 4)
-        await self.start_assistant(self.five, 5)
+        for idx, client in enumerate((self.one, self.two, self.three, self.four, self.five), 1):
+            await self.start_assistant(client, idx)
 
     async def stop(self):
         LOGGER(__name__).info("Stopping Assistants...")
-        for client, string_attr in [
-            (self.one, config.STRING1),
-            (self.two, config.STRING2),
-            (self.three, config.STRING3),
-            (self.four, config.STRING4),
-            (self.five, config.STRING5),
-        ]:
-            if string_attr:
+        for client in (self.one, self.two, self.three, self.four, self.five):
+            if client is not None:
                 try:
                     await client.stop()
                 except Exception as e:

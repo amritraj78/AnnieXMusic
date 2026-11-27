@@ -14,6 +14,8 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 from config import OWNER_ID
 from AnnieXMedia import app
 
+_eval_lock = asyncio.Lock()
+
 
 async def aexec(code, client, message):
     exec(
@@ -51,21 +53,22 @@ async def executor(client: Client, message: Message):
         return await message.delete()
 
     t1 = time()
-    old_stderr = sys.stderr
-    old_stdout = sys.stdout
-    redirected_output = sys.stdout = StringIO()
-    redirected_error = sys.stderr = StringIO()
-    stdout, stderr, exc = None, None, None
+    async with _eval_lock:
+        old_stderr = sys.stderr
+        old_stdout = sys.stdout
+        redirected_output = sys.stdout = StringIO()
+        redirected_error = sys.stderr = StringIO()
+        stdout, stderr, exc = None, None, None
 
-    try:
-        await aexec(cmd, client, message)
-    except Exception:
-        exc = traceback.format_exc()
-    finally:
-        stdout = redirected_output.getvalue()
-        stderr = redirected_error.getvalue()
-        sys.stdout = old_stdout
-        sys.stderr = old_stderr
+        try:
+            await aexec(cmd, client, message)
+        except Exception:
+            exc = traceback.format_exc()
+        finally:
+            stdout = redirected_output.getvalue()
+            stderr = redirected_error.getvalue()
+            sys.stdout = old_stdout
+            sys.stderr = old_stderr
 
     evaluation = "\n"
     if exc:
@@ -185,26 +188,38 @@ async def shellrunner(_, message: Message):
         except asyncio.TimeoutError:
             try:
                 proc.kill()
+                await proc.wait()
             except Exception:
                 pass
             return await edit_or_reply(message, text="<b>ERROR:</b> Command timed out after 60s.")
     except Exception as err:
-        return await edit_or_reply(message, text=f"<b>ERROR :</b>\n<pre>{err}</pre>")
+        return await edit_or_reply(message, text=f"<b>ERROR :</b>\n<pre>{html.escape(str(err))}</pre>")
 
     if not output.strip():
         output = "None"
 
-    if len(output) > 4096:
-        with open("output.txt", "w+", encoding="utf-8") as file:
-            file.write(output)
-        await app.send_document(
-            message.chat.id,
-            "output.txt",
-            reply_to_message_id=message.id,
-            caption="<code>Output</code>",
-        )
-        os.remove("output.txt")
+    formatted = f"<b>OUTPUT :</b>\n<pre>{html.escape(output)}</pre>"
+    if len(formatted) > 4096:
+        out_path = f"sh_output_{message.chat.id}_{message.id}.txt"
+        try:
+            def _write_out():
+                with open(out_path, "w", encoding="utf-8") as file:
+                    file.write(output)
+
+            await asyncio.to_thread(_write_out)
+            await app.send_document(
+                message.chat.id,
+                out_path,
+                reply_to_message_id=message.id,
+                caption="<code>Output</code>",
+            )
+        finally:
+            if os.path.exists(out_path):
+                try:
+                    await asyncio.to_thread(os.remove, out_path)
+                except OSError:
+                    pass
     else:
-        await edit_or_reply(message, text=f"<b>OUTPUT :</b>\n<pre>{output}</pre>")
+        await edit_or_reply(message, text=formatted)
 
     await message.stop_propagation()

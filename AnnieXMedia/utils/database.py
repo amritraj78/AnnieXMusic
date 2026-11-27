@@ -162,14 +162,14 @@ async def group_assistant(self, chat_id: int) -> int:
 
 async def is_skipmode(chat_id: int) -> bool:
     mode = skipmode.get(chat_id)
-    if not mode:
+    if mode is None:
         user = await skipdb.find_one({"chat_id": chat_id})
         if not user:
             skipmode[chat_id] = True
             return True
         skipmode[chat_id] = False
         return False
-    return mode
+    return bool(mode)
 
 
 async def skip_on(chat_id: int):
@@ -378,14 +378,14 @@ async def check_nonadmin_chat(chat_id: int) -> bool:
 
 async def is_nonadmin_chat(chat_id: int) -> bool:
     mode = nonadmin.get(chat_id)
-    if not mode:
+    if mode is None:
         user = await authdb.find_one({"chat_id": chat_id})
         if not user:
             nonadmin[chat_id] = False
             return False
         nonadmin[chat_id] = True
         return True
-    return mode
+    return bool(mode)
 
 
 async def add_nonadmin_chat(chat_id: int):
@@ -475,6 +475,10 @@ async def get_served_users() -> list:
     return users_list
 
 
+async def get_served_users_count() -> int:
+    return await usersdb.count_documents({"user_id": {"$gt": 0}})
+
+
 async def add_served_user(user_id: int):
     is_served = await is_served_user(user_id)
     if is_served:
@@ -487,6 +491,10 @@ async def get_served_chats() -> list:
     async for chat in chatsdb.find({"chat_id": {"$lt": 0}}):
         chats_list.append(chat)
     return chats_list
+
+
+async def get_served_chats_count() -> int:
+    return await chatsdb.count_documents({"chat_id": {"$lt": 0}})
 
 
 async def is_served_chat(chat_id: int) -> bool:
@@ -607,23 +615,19 @@ async def get_sudoers() -> list:
     sudoers = await sudoersdb.find_one({"sudo": "sudo"})
     if not sudoers:
         return []
-    return sudoers["sudoers"]
+    return list(sudoers.get("sudoers") or [])
 
 
 async def add_sudo(user_id: int) -> bool:
-    sudoers = await get_sudoers()
-    sudoers.append(user_id)
     await sudoersdb.update_one(
-        {"sudo": "sudo"}, {"$set": {"sudoers": sudoers}}, upsert=True
+        {"sudo": "sudo"}, {"$addToSet": {"sudoers": int(user_id)}}, upsert=True
     )
     return True
 
 
 async def remove_sudo(user_id: int) -> bool:
-    sudoers = await get_sudoers()
-    sudoers.remove(user_id)
     await sudoersdb.update_one(
-        {"sudo": "sudo"}, {"$set": {"sudoers": sudoers}}, upsert=True
+        {"sudo": "sudo"}, {"$pull": {"sudoers": int(user_id)}}
     )
     return True
 
@@ -631,15 +635,14 @@ async def remove_sudo(user_id: int) -> bool:
 async def get_banned_users() -> list:
     results = []
     async for user in blockeddb.find({"user_id": {"$gt": 0}}):
-        user_id = user["user_id"]
-        results.append(user_id)
+        user_id = user.get("user_id")
+        if user_id is not None:
+            results.append(user_id)
     return results
 
 
 async def get_banned_count() -> int:
-    users = blockeddb.find({"user_id": {"$gt": 0}})
-    users = await users.to_list(length=100000)
-    return len(users)
+    return await blockeddb.count_documents({"user_id": {"$gt": 0}})
 
 
 async def is_banned_user(user_id: int) -> bool:

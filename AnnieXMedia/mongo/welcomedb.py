@@ -1,6 +1,8 @@
 # Authored By Certified Coders © 2025
 from datetime import datetime, timedelta, timezone
 from typing import Optional
+from pymongo import ReturnDocument
+
 from AnnieXMedia.core.mongo import mongodb
 
 _col = mongodb["welcome"]
@@ -18,24 +20,27 @@ async def set_state(chat_id: int, flag: str) -> None:
 
 
 async def bump(chat_id: int, time_window: int = 8) -> int:
+    """Atomically increment burst join counter inside window, avoiding raid-count race conditions."""
     now = datetime.now(timezone.utc)
-    doc = await _col.find_one({"_id": chat_id}, {"last_ts": 1, "join_cnt": 1})
-    last_ts: Optional[datetime] = doc.get("last_ts") if doc else None
+    cutoff = now - timedelta(seconds=time_window)
 
-    if last_ts and last_ts.tzinfo is None:
-        last_ts = last_ts.replace(tzinfo=timezone.utc)
-
-    if last_ts and (now - last_ts).total_seconds() <= time_window:
-        cnt = int((doc.get("join_cnt") or 0)) + 1
-    else:
-        cnt = 1
-
-    await _col.update_one(
-        {"_id": chat_id},
-        {"$set": {"last_ts": now, "join_cnt": cnt}},
-        upsert=True,
+    # First try atomic increment if last_ts is within active window
+    updated = await _col.find_one_and_update(
+        {"_id": chat_id, "last_ts": {"$gte": cutoff}},
+        {"$inc": {"join_cnt": 1}, "$set": {"last_ts": now}},
+        return_document=ReturnDocument.AFTER,
     )
-    return cnt
+    if updated and "join_cnt" in updated:
+        return int(updated["join_cnt"])
+
+    # Window expired or first doc: atomically reset counter to 1
+    doc = await _col.find_one_and_update(
+        {"_id": chat_id},
+        {"$set": {"last_ts": now, "join_cnt": 1}},
+        upsert=True,
+        return_document=ReturnDocument.AFTER,
+    )
+    return int((doc or {}).get("join_cnt") or 1)
 
 
 async def cool(chat_id: int, cool_minutes: int = 10) -> None:
@@ -53,18 +58,11 @@ async def cool(chat_id: int, cool_minutes: int = 10) -> None:
 
 
 async def auto_on(chat_id: int) -> bool:
+    """Atomically re-enable welcome once cooldown expires, returning True at most once."""
     now = datetime.now(timezone.utc)
-    doc = await _col.find_one({"_id": chat_id}, {"cool_until": 1})
-    cool_until: Optional[datetime] = (doc or {}).get("cool_until")
-
-    if cool_until and cool_until.tzinfo is None:
-        cool_until = cool_until.replace(tzinfo=timezone.utc)
-
-    if cool_until and now >= cool_until:
-        await _col.update_one(
-            {"_id": chat_id},
-            {"$set": {"state": "on"}, "$unset": {"cool_until": ""}},
-            upsert=True,
-        )
-        return True
-    return False
+    prev = await _col.find_one_and_update(
+        {"_id": chat_id, "cool_until": {"$lte": now}},
+        {"$set": {"state": "on"}, "$unset": {"cool_until": ""}},
+        return_document=ReturnDocument.BEFORE,
+    )
+    return bool(prev)

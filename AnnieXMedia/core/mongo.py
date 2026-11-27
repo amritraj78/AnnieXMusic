@@ -41,6 +41,7 @@ _CHAT_ID_COLLECTIONS = (
     "cplaymode",
     "blacklistChat",
     "autoend",
+    "couple",
 )
 _USER_ID_COLLECTIONS = ("tgusersdb", "gban", "blockedusers")
 _EXTRA_INDEXES: Dict[str, List[List[Tuple[str, int]]]] = {
@@ -49,6 +50,10 @@ _EXTRA_INDEXES: Dict[str, List[List[Tuple[str, int]]]] = {
         [("user_id", 1), ("game", 1)],
     ],
     "onoffper": [[("on_off", 1)]],
+    "pretender": [
+        [("user_id", 1)],
+        [("chat_id_toggle", 1)],
+    ],
 }
 
 

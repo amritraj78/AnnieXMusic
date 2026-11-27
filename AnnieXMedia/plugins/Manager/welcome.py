@@ -1,6 +1,9 @@
 # Authored By Certified Coders © 2025
-import os
 import asyncio
+import html
+import os
+import uuid
+from collections import OrderedDict
 from functools import lru_cache
 from PIL import Image, ImageDraw, ImageFont
 from pyrogram import filters, enums
@@ -32,8 +35,9 @@ JOIN_THRESHOLD = 20
 TIME_WINDOW = 10
 COOL_MINUTES = 5
 WELCOME_LIMIT = 5
+MAX_TRACKED_CHATS = 2000
 
-last_messages = {}
+last_messages: OrderedDict[int, list] = OrderedDict()
 
 @lru_cache(maxsize=1)
 def cached_bg():
@@ -61,14 +65,15 @@ def build_pic(av, fn, uid, un):
     d.text((421, 715), fn, fill=(242, 242, 242), font=f)
     d.text((270, 1005), str(uid), fill=(242, 242, 242), font=f)
     d.text((570, 1308), un, fill=(242, 242, 242), font=f)
-    path = f"downloads/welcome_{uid}.png"
+    tok = uuid.uuid4().hex[:8]
+    path = f"downloads/welcome_{uid}_{tok}.png"
     bg.save(path)
     return path
 
 async def safe_send(func, *args, **kwargs):
     try:
         return await func(*args, **kwargs)
-    except:
+    except Exception:
         return None
 
 @app.on_message(filters.command("welcome") & filters.group)
@@ -80,7 +85,7 @@ async def toggle(client, m: Message):
         return
     try:
         u = await client.get_chat_member(m.chat.id, user_id)
-    except:
+    except Exception:
         return
     if u.status not in (enums.ChatMemberStatus.ADMINISTRATOR, enums.ChatMemberStatus.OWNER):
         return await m.reply_text("**sᴏʀʀʏ ᴏɴʟʏ ᴀᴅᴍɪɴs ᴄᴀɴ ᴄʜᴀɴɢᴇ ᴡᴇʟᴄᴏᴍᴇ ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴ sᴛᴀᴛᴜs!**")
@@ -93,7 +98,7 @@ async def toggle(client, m: Message):
     if flag == "on" and cur:
         return await m.reply_text("**ᴡᴇʟᴄᴏᴍᴇ ɴᴏᴛɪғɪᴄᴀᴛɪᴏɴ ᴀʟʀᴇᴀᴅʏ ᴇɴᴀʙʟᴇᴅ!**")
     await set_state(m.chat.id, flag)
-    await m.reply_text(f"**{'ᴇɴᴀʙʟᴇᴅ' if flag == 'on' else 'ᴅɪsᴀʙʟᴇᴅ'} ᴡᴇʟᴄᴏᴍᴇ ɪɴ {m.chat.title}**")
+    await m.reply_text(f"**{'ᴇɴᴀʙʟᴇᴅ' if flag == 'on' else 'ᴅɪsᴀʙʟᴇᴅ'} ᴡᴇʟᴄᴏᴍᴇ ɪɴ {html.escape(m.chat.title or 'Chat')}**")
 
 @app.on_chat_member_updated(filters.group, group=-3)
 async def welcome(client, update: ChatMemberUpdated):
@@ -109,13 +114,13 @@ async def welcome(client, update: ChatMemberUpdated):
     if not hasattr(client, "cached_me"):
         try:
             client.cached_me = await client.get_me()
-        except:
+        except Exception:
             return
     me = client.cached_me
 
     try:
         await client.get_chat_member(cid, me.id)
-    except:
+    except Exception:
         return
 
     if not await is_on(cid):
@@ -138,48 +143,53 @@ async def welcome(client, update: ChatMemberUpdated):
     if user.photo and hasattr(user.photo, "big_file_id"):
         file_id = user.photo.big_file_id
 
-    avatar = await safe_send(client.download_media, file_id, file_name=f"downloads/pp_{user.id}.png") if file_id else None
+    tok = uuid.uuid4().hex[:8]
+    avatar = await safe_send(client.download_media, file_id, file_name=f"downloads/pp_{user.id}_{tok}.png") if file_id else None
     if not avatar:
         avatar = FALLBACK_PIC
 
-    img = await asyncio.to_thread(
-        build_pic, avatar, user.first_name, user.id, user.username or "No Username"
-    )
+    img = None
+    try:
+        img = await asyncio.to_thread(
+            build_pic, avatar, user.first_name or "User", user.id, user.username or "No Username"
+        )
 
-    members = await safe_send(client.get_chat_members_count, cid) or "?"
+        members = await safe_send(client.get_chat_members_count, cid) or "?"
 
-    caption = CAPTION_TXT.format(
-        chat_title=update.chat.title,
-        mention=user.mention,
-        uid=user.id,
-        uname=user.username or "No Username",
-        count=members
-    )
+        caption = CAPTION_TXT.format(
+            chat_title=html.escape(update.chat.title or "Chat"),
+            mention=user.mention,
+            uid=user.id,
+            uname=html.escape(user.username or "No Username"),
+            count=members
+        )
 
-    sent = await safe_send(
-        client.send_photo,
-        cid,
-        img,
-        caption=caption,
-        reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton(BTN_VIEW, url=f"tg://openmessage?user_id={user.id}")],
-            [InlineKeyboardButton(BTN_ADD, url=f"https://t.me/{me.username}?startgroup=true")],
-        ])
-    )
+        sent = await safe_send(
+            client.send_photo,
+            cid,
+            img,
+            caption=caption,
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton(BTN_VIEW, url=f"tg://openmessage?user_id={user.id}")],
+                [InlineKeyboardButton(BTN_ADD, url=f"https://t.me/{me.username}?startgroup=true")],
+            ])
+        )
 
-    if sent:
-        last_messages.setdefault(cid, []).append(sent)
-        if len(last_messages[cid]) > WELCOME_LIMIT:
-            old_msg = last_messages[cid].pop(0)
-            if old_msg:
-                await safe_send(old_msg.delete)
-
-    async def cleanup(path):
-        if path and os.path.exists(path) and not os.path.abspath(path).startswith(os.path.abspath("AnnieXMedia/assets")):
-            try:
-                os.remove(path)
-            except:
-                pass
-
-    asyncio.create_task(cleanup(avatar))
-    asyncio.create_task(cleanup(img))
+        if sent:
+            msgs = last_messages.setdefault(cid, [])
+            msgs.append(sent)
+            last_messages.move_to_end(cid)
+            if len(msgs) > WELCOME_LIMIT:
+                old_msg = msgs.pop(0)
+                if old_msg:
+                    await safe_send(old_msg.delete)
+            while len(last_messages) > MAX_TRACKED_CHATS:
+                last_messages.popitem(last=False)
+    finally:
+        assets_dir = os.path.abspath("AnnieXMedia/assets")
+        for path in (avatar, img):
+            if path and os.path.exists(path) and not os.path.abspath(path).startswith(assets_dir):
+                try:
+                    await asyncio.to_thread(os.remove, path)
+                except Exception:
+                    pass
