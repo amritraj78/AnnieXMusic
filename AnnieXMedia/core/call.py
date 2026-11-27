@@ -68,34 +68,44 @@ async def _clear_(chat_id: int) -> None:
     await set_loop(chat_id, 0)
 
 class Call:
+    """Manage assistant Pyrogram clients and PyTgCalls voice/video call sessions."""
+
+    _CLIENT_SLOTS = (
+        ("AnnieXAssis1", "userbot1", "one", "STRING1"),
+        ("AnnieXAssis2", "userbot2", "two", "STRING2"),
+        ("AnnieXAssis3", "userbot3", "three", "STRING3"),
+        ("AnnieXAssis4", "userbot4", "four", "STRING4"),
+        ("AnnieXAssis5", "userbot5", "five", "STRING5"),
+    )
+
     def __init__(self):
-        self.userbot1 = Client(
-            "AnnieXAssis1", config.API_ID, config.API_HASH, session_string=config.STRING1, no_updates=True, workers=4
-        ) if config.STRING1 else None
-        self.one = PyTgCalls(self.userbot1, workers=4) if self.userbot1 else None
-
-        self.userbot2 = Client(
-            "AnnieXAssis2", config.API_ID, config.API_HASH, session_string=config.STRING2, no_updates=True, workers=4
-        ) if config.STRING2 else None
-        self.two = PyTgCalls(self.userbot2, workers=4) if self.userbot2 else None
-
-        self.userbot3 = Client(
-            "AnnieXAssis3", config.API_ID, config.API_HASH, session_string=config.STRING3, no_updates=True, workers=4
-        ) if config.STRING3 else None
-        self.three = PyTgCalls(self.userbot3, workers=4) if self.userbot3 else None
-
-        self.userbot4 = Client(
-            "AnnieXAssis4", config.API_ID, config.API_HASH, session_string=config.STRING4, no_updates=True, workers=4
-        ) if config.STRING4 else None
-        self.four = PyTgCalls(self.userbot4, workers=4) if self.userbot4 else None
-
-        self.userbot5 = Client(
-            "AnnieXAssis5", config.API_ID, config.API_HASH, session_string=config.STRING5, no_updates=True, workers=4
-        ) if config.STRING5 else None
-        self.five = PyTgCalls(self.userbot5, workers=4) if self.userbot5 else None
-
+        for _, ub_attr, call_attr, _ in self._CLIENT_SLOTS:
+            setattr(self, ub_attr, None)
+            setattr(self, call_attr, None)
+        self._clients_built = False
         self.active_calls: set[int] = set()
         self._locks: dict[int, asyncio.Lock] = {}
+
+    def _ensure_clients(self) -> None:
+        if self._clients_built:
+            return
+        for session_name, ub_attr, call_attr, cfg_attr in self._CLIENT_SLOTS:
+            raw_session = (getattr(config, cfg_attr, None) or "").strip()
+            if raw_session and raw_session.lower() != "none":
+                ub = Client(
+                    session_name,
+                    config.API_ID,
+                    config.API_HASH,
+                    session_string=raw_session,
+                    no_updates=True,
+                    workers=4,
+                )
+                setattr(self, ub_attr, ub)
+                setattr(self, call_attr, PyTgCalls(ub, workers=4))
+            else:
+                setattr(self, ub_attr, None)
+                setattr(self, call_attr, None)
+        self._clients_built = True
 
     def _lock_for(self, chat_id: int) -> asyncio.Lock:
         lock = self._locks.get(chat_id)
@@ -656,6 +666,7 @@ class Call:
 
     async def start(self) -> None:
         LOGGER(__name__).info("Starting PyTgCalls Clients...")
+        self._ensure_clients()
         for client in (self.one, self.two, self.three, self.four, self.five):
             if client:
                 await client.start()
