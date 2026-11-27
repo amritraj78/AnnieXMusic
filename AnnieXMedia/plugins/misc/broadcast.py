@@ -186,6 +186,6 @@ async def auto_clean():
 
 
 try:
-    asyncio.create_task(auto_clean())
+    asyncio.get_running_loop().create_task(auto_clean())
 except RuntimeError:
     pass

@@ -10,12 +10,12 @@ from urllib.parse import quote
 
 import aiofiles
 import aiohttp
-from aiohttp import TCPConnector
 from yt_dlp import YoutubeDL
 
 from AnnieXMedia.core.dir import CACHE_DIR, DOWNLOAD_DIR
+from AnnieXMedia.core.http_pool import close_http_session, get_http_session
+from AnnieXMedia.core.security import is_safe_http_url, sanitize_ext
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
-from AnnieXMedia.utils.security import is_safe_http_url, sanitize_ext
 from AnnieXMedia.utils.tuning import CHUNK_SIZE, SEM
 from config import API_KEY, API_URL, VIDEO_API_URL
 from AnnieXMedia.logging import LOGGER
@@ -26,8 +26,6 @@ USE_AUDIO_API = bool(API_URL and API_KEY)
 USE_VIDEO_API = bool(VIDEO_API_URL and API_KEY)
 _inflight: Dict[str, asyncio.Future] = {}
 _inflight_lock = asyncio.Lock()
-_session: Optional[aiohttp.ClientSession] = None
-_session_lock = asyncio.Lock()
 YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 
 
@@ -87,27 +85,6 @@ def get_ytdlp_base_opts() -> Dict[str, object]:
     if cookiefile := get_cookie_file():
         opts["cookiefile"] = cookiefile
     return opts
-
-
-async def get_http_session() -> aiohttp.ClientSession:
-    global _session
-    if _session and not _session.closed:
-        return _session
-    async with _session_lock:
-        if _session and not _session.closed:
-            return _session
-        timeout = aiohttp.ClientTimeout(total=600, sock_connect=20, sock_read=60)
-        connector = TCPConnector(limit=0, ttl_dns_cache=300, enable_cleanup_closed=True)
-        _session = aiohttp.ClientSession(timeout=timeout, connector=connector)
-        return _session
-
-
-async def close_http_session() -> None:
-    global _session
-    async with _session_lock:
-        if _session and not _session.closed:
-            await _session.close()
-        _session = None
 
 
 async def download_file(url: str, out_path: str) -> Optional[str]:

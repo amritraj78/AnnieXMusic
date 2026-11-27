@@ -13,12 +13,13 @@ from pyrogram.enums import MessageEntityType
 from pyrogram.types import Message
 from youtubesearchpython.aio import VideosSearch, Playlist
 
+from AnnieXMedia.core.http_pool import get_http_session
+from AnnieXMedia.core.security import is_safe_http_url
 from AnnieXMedia.utils.cookie_handler import get_valid_cookie_file
 from AnnieXMedia.utils.database import is_on_off
-from AnnieXMedia.utils.downloader import extract_video_id, get_http_session, yt_dlp_download
+from AnnieXMedia.utils.downloader import extract_video_id, yt_dlp_download
 from AnnieXMedia.utils.errors import capture_internal_err
 from AnnieXMedia.utils.formatters import time_to_seconds
-from AnnieXMedia.utils.security import is_safe_http_url
 from AnnieXMedia.utils.tuning import YTDLP_TIMEOUT, YOUTUBE_META_MAX, YOUTUBE_META_TTL
 
 

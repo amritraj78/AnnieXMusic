@@ -137,6 +137,6 @@ async def daily_backup_task():
 
 
 try:
-    asyncio.create_task(daily_backup_task())
+    asyncio.get_running_loop().create_task(daily_backup_task())
 except RuntimeError:
     pass

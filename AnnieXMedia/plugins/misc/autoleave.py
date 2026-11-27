@@ -45,7 +45,7 @@ async def auto_leave():
 
 
 try:
-    asyncio.create_task(auto_leave())
+    asyncio.get_running_loop().create_task(auto_leave())
 except RuntimeError:
     pass
 
@@ -81,6 +81,6 @@ async def auto_end():
 
 
 try:
-    asyncio.create_task(auto_end())
+    asyncio.get_running_loop().create_task(auto_end())
 except RuntimeError:
     pass

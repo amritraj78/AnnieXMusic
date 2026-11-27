@@ -7,7 +7,7 @@ from yt_dlp import YoutubeDL
 
 from AnnieXMedia.utils.downloader import yt_dlp_download
 from AnnieXMedia.utils.formatters import seconds_to_min
-from AnnieXMedia.utils.security import is_safe_http_url
+from AnnieXMedia.core.security import is_safe_http_url
 
 _SC_RE = re.compile(r"^https?://(soundcloud\.com|on\.soundcloud\.com)/.+", re.I)
 

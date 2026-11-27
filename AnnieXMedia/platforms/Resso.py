@@ -6,7 +6,7 @@ from typing import Optional, Tuple, Union
 from bs4 import BeautifulSoup
 from youtubesearchpython.aio import VideosSearch
 
-from AnnieXMedia.utils.security import fetch_url_limited
+from AnnieXMedia.core.security import fetch_url_limited
 
 
 class RessoAPI:

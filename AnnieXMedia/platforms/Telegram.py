@@ -14,7 +14,7 @@ from AnnieXMedia.utils.formatters import (
     get_readable_time,
     seconds_to_min,
 )
-from AnnieXMedia.utils.security import safe_path_under, sanitize_ext, sanitize_id_token
+from AnnieXMedia.core.security import safe_path_under, sanitize_ext, sanitize_id_token
 
 
 class TeleAPI:

@@ -7,8 +7,8 @@ from pathlib import Path
 import aiohttp
 from aiohttp import client_exceptions
 
-from AnnieXMedia.utils.downloader import get_http_session
-from AnnieXMedia.utils.security import safe_path_under, sanitize_id_token
+from AnnieXMedia.core.http_pool import get_http_session
+from AnnieXMedia.core.security import safe_path_under, sanitize_id_token
 
 
 class UnableToFetchCarbon(Exception):

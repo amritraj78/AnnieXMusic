@@ -8,7 +8,7 @@ from git import Repo
 from git.exc import GitCommandError, InvalidGitRepositoryError
 
 import config
-from AnnieXMedia.utils.security import redact_secrets
+from AnnieXMedia.core.security import redact_secrets
 
 from ..logging import LOGGER
 

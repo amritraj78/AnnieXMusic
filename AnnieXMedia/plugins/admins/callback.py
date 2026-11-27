@@ -409,7 +409,10 @@ async def markup_timer():
                 continue
 
 
-asyncio.create_task(markup_timer())
+try:
+    asyncio.get_running_loop().create_task(markup_timer())
+except RuntimeError:
+    pass
 
 
 @app.on_callback_query(filters.regex(r"^(?:close|close_data)$") & ~BANNED_USERS)

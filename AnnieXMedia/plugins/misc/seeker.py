@@ -29,6 +29,6 @@ async def timer():
 
 
 try:
-    asyncio.create_task(timer())
+    asyncio.get_running_loop().create_task(timer())
 except RuntimeError:
     pass

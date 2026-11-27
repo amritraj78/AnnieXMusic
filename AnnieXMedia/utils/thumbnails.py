@@ -8,8 +8,8 @@ from PIL import Image, ImageDraw, ImageEnhance, ImageFilter, ImageFont
 from youtubesearchpython.aio import VideosSearch
 from config import YOUTUBE_IMG_URL
 from AnnieXMedia.core.dir import CACHE_DIR
-from AnnieXMedia.utils.downloader import get_http_session
-from AnnieXMedia.utils.security import is_safe_http_url, safe_path_under, sanitize_id_token
+from AnnieXMedia.core.http_pool import get_http_session
+from AnnieXMedia.core.security import is_safe_http_url, safe_path_under, sanitize_id_token
 
 
 PANEL_W, PANEL_H = 763, 545

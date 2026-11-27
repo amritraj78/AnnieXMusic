@@ -5,8 +5,8 @@ from functools import partial
 
 import aiohttp
 
-from AnnieXMedia.utils.downloader import get_http_session
-from AnnieXMedia.utils.security import redact_secrets
+from AnnieXMedia.core.http_pool import get_http_session
+from AnnieXMedia.core.security import redact_secrets
 
 
 def _netcat(host, port, content):
