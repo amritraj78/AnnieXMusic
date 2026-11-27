@@ -1,0 +1,21 @@
+# Koyeb Free Plan Configuration
+# Deploy AnnieXMusic on Koyeb Free Nano Instance
+name: anniexmusic
+services:
+  - name: anniexmusic
+    type: web
+    instance_type: nano
+    regions:
+      - fra
+    ports:
+      - port: 8080
+        path: /
+    routes:
+      - path: /
+        port: 8080
+    health_checks:
+      - http:
+          path: /health
+          port: 8080
+    docker:
+      dockerfile: Dockerfile

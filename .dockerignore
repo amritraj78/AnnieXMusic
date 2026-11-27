@@ -1,0 +1,17 @@
+.git
+.env
+.cache
+log.txt*
+ignored_errors.log
+.DS_Store
+*.session
+*.session-journal
+*.pyc
+raw_files/
+cache/
+downloads/
+couples/
+playback/
+AnnieXMediaBackup/
+__pycache__/
+output*.txt

@@ -1,0 +1,20 @@
+# Authored By Certified Coders © 2025
+import time
+
+import psutil
+
+from AnnieXMedia.misc import _boot_
+from AnnieXMedia.utils.formatters import get_readable_time
+
+
+def _sync_sys_stats():
+    bot_uptime = int(time.time() - _boot_)
+    UP = f"{get_readable_time(bot_uptime)}"
+    CPU = f"{psutil.cpu_percent(interval=None)}%"
+    RAM = f"{psutil.virtual_memory().percent}%"
+    DISK = f"{psutil.disk_usage('/').percent}%"
+    return UP, CPU, RAM, DISK
+
+
+async def bot_sys_stats():
+    return _sync_sys_stats()
