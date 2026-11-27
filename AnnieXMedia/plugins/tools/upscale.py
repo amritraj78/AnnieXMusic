@@ -110,7 +110,8 @@ async def draw_image(_, message: Message):
     if reply and (reply.text or reply.caption):
         query = reply.text or reply.caption
     elif len(message.command) > 1:
-        query = message.text.split(None, 1)[1]
+        parts = (message.text or message.caption or "").split(None, 1)
+        query = parts[1] if len(parts) > 1 else None
 
     if not query:
         return await message.reply_text("💬 Please reply or provide text.")

@@ -71,7 +71,8 @@ async def tag_all_users(client: Client, message: Message):
         return await message.reply("⚠️ **ᴀ ᴛᴀɢɢɪɴɢ sᴇssɪᴏɴ ɪs ᴀʟʀᴇᴀᴅʏ ʀᴜɴɴɪɴɢ. ᴜsᴇ /cancel ᴏʀ /ustop ᴛᴏ sᴛᴏᴘ ɪᴛ.**")
 
     replied = message.reply_to_message
-    text = message.text.split(None, 1)[1] if len(message.command) > 1 else ""
+    parts = (message.text or message.caption or "").split(None, 1)
+    text = parts[1] if len(parts) > 1 else ""
 
     if not replied and not text:
         return await message.reply("**ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴍᴇssᴀɢᴇ ᴏʀ ɢɪᴠᴇ sᴏᴍᴇ ᴛᴇxᴛ ᴛᴏ ᴛᴀɢ ᴀʟʟ.**")

@@ -14,7 +14,8 @@ async def password(bot, message):
     characters = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890!@#$%^&*()_+"
     
     if len(message.command) > 1:
-        input_length = message.text.split(" ", 1)[1]
+        parts = (message.text or message.caption or "").split(None, 1)
+        input_length = parts[1] if len(parts) > 1 else ""
     else:
         input_length = secrets.choice(["5", "6", "7", "8", "9", "10", "12", "14"])
 

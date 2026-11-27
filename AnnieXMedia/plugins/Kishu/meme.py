@@ -10,7 +10,7 @@ from AnnieXMedia.logging import LOGGER
 
 @app.on_message(filters.command("meme"))
 async def meme_command(client, message):
-    args = message.text.split()
+    args = (message.text or message.caption or "").split()
     category = args[1].strip() if len(args) > 1 else ""
     if category and not re.match(r"^[A-Za-z0-9_]{1,50}$", category):
         return await message.reply_text("❌ Invalid subreddit/category name.")

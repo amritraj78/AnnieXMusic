@@ -26,7 +26,7 @@ async def get_waifu_data(tag: str):
 @app.on_message(filters.command("waifu"))
 async def waifu_command_handler(_, message: Message):
     try:
-        args = message.text.split(maxsplit=1)
+        args = (message.text or message.caption or "").split(maxsplit=1)
         tag = args[1].strip().lower() if len(args) > 1 else "maid"
         if not re.match(r"^[a-z0-9_-]{1,32}$", tag):
             return await message.reply_text("❌ ɪɴᴠᴀʟɪᴅ ᴡᴀɪꜰᴜ ᴛᴀɢ.")

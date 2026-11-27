@@ -18,7 +18,7 @@ from config import BANNED_USERS
 async def playmode_(client, message: Message, _):
     if len(message.command) < 2:
         return await message.reply_text(_["cplay_1"].format(message.chat.title))
-    query = message.text.split(None, 2)[1].lower().strip()
+    query = message.command[1].lower().strip()
     if (str(query)).lower() == "disable":
         await set_cmode(message.chat.id, None)
         return await message.reply_text(_["cplay_7"])

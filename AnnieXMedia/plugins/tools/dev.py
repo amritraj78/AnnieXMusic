@@ -64,10 +64,10 @@ async def executor(client: Client, message: Message):
     if len(message.command) < 2:
         return await edit_or_reply(message, text="<b>ᴡʜᴀᴛ ʏᴏᴜ ᴡᴀɴɴᴀ ᴇxᴇᴄᴜᴛᴇ ʙᴀʙʏ ?</b>")
 
-    try:
-        cmd = message.text.split(" ", maxsplit=1)[1]
-    except IndexError:
+    parts = (message.text or message.caption or "").split(None, 1)
+    if len(parts) < 2:
         return await message.delete()
+    cmd = parts[1]
 
     t1 = time()
     async with _eval_lock:
@@ -187,7 +187,10 @@ async def shellrunner(_, message: Message):
     if len(message.command) < 2:
         return await edit_or_reply(message, text="<b>ᴇxᴀᴍᴩʟᴇ :</b>\n/sh git pull")
 
-    text = message.text.split(None, 1)[1]
+    parts = (message.text or message.caption or "").split(None, 1)
+    if len(parts) < 2:
+        return await edit_or_reply(message, text="<b>ᴇxᴀᴍᴩʟᴇ :</b>\n/sh git pull")
+    text = parts[1]
 
     try:
         proc = await asyncio.create_subprocess_shell(

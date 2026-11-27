@@ -17,8 +17,8 @@ async def translate(_, message: Message):
     content = (reply.text or reply.caption)[:4000]
 
     try:
-        if len(message.command) > 1 and message.text:
-            arg = message.text.split(maxsplit=1)[1].strip().lower()
+        if len(message.command) > 1 and (message.text or message.caption):
+            arg = (message.text or message.caption or "").split(maxsplit=1)[1].strip().lower()
             if "//" in arg:
                 source_lang, target_lang = arg.split("//", 1)
             else:

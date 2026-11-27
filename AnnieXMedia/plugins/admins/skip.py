@@ -24,7 +24,7 @@ async def skip(cli, message: Message, _, chat_id):
         loop = await get_loop(chat_id)
         if loop != 0:
             return await message.reply_text(_["admin_8"])
-        state = message.text.split(None, 1)[1].strip()
+        state = message.command[1].strip()
         if state.isnumeric():
             state = int(state)
             check = db.get(chat_id)

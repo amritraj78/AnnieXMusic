@@ -149,7 +149,10 @@ async def _do_kickall(client, chat_id: int):
             await client.unban_chat_member(chat_id, m.user.id)
             kicked += 1
         except FloodWait as fw:
-            await asyncio.sleep(fw.value + 1)
+            if fw.value > 60:
+                errors += 1
+                break
+            await asyncio.sleep(min(int(fw.value), 60) + 1)
         except Exception:
             errors += 1
         await asyncio.sleep(0.05)
@@ -171,7 +174,10 @@ async def _do_banall(client, chat_id: int):
             await client.ban_chat_member(chat_id, m.user.id)
             banned += 1
         except FloodWait as fw:
-            await asyncio.sleep(fw.value + 1)
+            if fw.value > 60:
+                errors += 1
+                break
+            await asyncio.sleep(min(int(fw.value), 60) + 1)
         except Exception:
             errors += 1
         await asyncio.sleep(0.05)
@@ -188,7 +194,10 @@ async def _do_unbanall(client, chat_id: int):
             await client.unban_chat_member(chat_id, m.user.id)
             unbanned += 1
         except FloodWait as fw:
-            await asyncio.sleep(fw.value + 1)
+            if fw.value > 60:
+                errors += 1
+                break
+            await asyncio.sleep(min(int(fw.value), 60) + 1)
         except Exception:
             errors += 1
         await asyncio.sleep(0.05)
@@ -205,7 +214,10 @@ async def _do_muteall(client, chat_id: int):
             await client.restrict_chat_member(chat_id, m.user.id, perms)
             muted += 1
         except FloodWait as fw:
-            await asyncio.sleep(fw.value + 1)
+            if fw.value > 60:
+                errors += 1
+                break
+            await asyncio.sleep(min(int(fw.value), 60) + 1)
         except Exception:
             errors += 1
         await asyncio.sleep(0.05)
@@ -229,7 +241,10 @@ async def _do_unmuteall(client, chat_id: int):
             await client.restrict_chat_member(chat_id, m.user.id, perms)
             unmuted += 1
         except FloodWait as fw:
-            await asyncio.sleep(fw.value + 1)
+            if fw.value > 60:
+                errors += 1
+                break
+            await asyncio.sleep(min(int(fw.value), 60) + 1)
         except Exception:
             errors += 1
         await asyncio.sleep(0.05)

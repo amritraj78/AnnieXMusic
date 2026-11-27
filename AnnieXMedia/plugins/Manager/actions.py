@@ -273,7 +273,8 @@ async def dban_cmd(client, message: Message):
     user = message.reply_to_message.from_user
     if not user:
         return await message.reply_text("I cannot ban a channel or anonymous admin.")
-    reason = message.text.split(None, 1)[1] if len(message.command) > 1 else None
+    raw_parts = (message.text or message.caption or "").split(None, 1)
+    reason = raw_parts[1] if len(raw_parts) > 1 else None
 
     target = await _get_member_safe(client, message.chat.id, user.id)
     if target and _is_admin_status(target.status):

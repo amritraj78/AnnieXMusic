@@ -23,7 +23,7 @@ async def maintenance(client, message: Message):
     usage = _["maint_1"]
     if len(message.command) != 2:
         return await message.reply_text(usage)
-    state = message.text.split(None, 1)[1].strip().lower()
+    state = message.command[1].strip().lower()
     if state == "enable":
         if await is_maintenance() is False:
             await message.reply_text(_["maint_4"])

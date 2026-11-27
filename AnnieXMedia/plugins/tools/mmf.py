@@ -99,7 +99,8 @@ async def mmf(_, message: Message):
     chat_id = message.chat.id
     reply_message = message.reply_to_message
 
-    if not message.text or len(message.text.split()) < 2:
+    raw_cmd_text = (message.text or message.caption or "")
+    if not raw_cmd_text or len(raw_cmd_text.split()) < 2:
         await message.reply_text("**Give me text after /mmf to memify.**")
         return
 
@@ -125,7 +126,7 @@ async def mmf(_, message: Message):
         return await message.reply_text("❌ **Please reply to an image or static sticker to memify.**")
 
     msg = await message.reply_text("❄️")
-    text = message.text.split(None, 1)[1][:300]
+    text = raw_cmd_text.split(None, 1)[1][:300]
     file = None
     output_file = None
     try:

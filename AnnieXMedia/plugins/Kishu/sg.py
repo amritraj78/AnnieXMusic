@@ -27,7 +27,7 @@ async def sg(client: Client, message: Message):
                 return await status_msg.edit("❌ Cannot get history for channel or anonymous message.")
             target_user_id = message.reply_to_message.from_user.id
         else:
-            parts = message.text.split()
+            parts = (message.text or message.caption or "").split()
             if len(parts) < 2:
                 return await status_msg.edit("❌ Usage: `/sg` username / id / reply", parse_mode=enums.ParseMode.MARKDOWN)
 

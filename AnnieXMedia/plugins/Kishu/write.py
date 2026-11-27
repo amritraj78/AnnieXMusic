@@ -10,10 +10,14 @@ from AnnieXMedia.core.http_pool import get_http_session
 
 @app.on_message(filters.command("write"))
 async def handwrite(_, message: Message):
-    if message.reply_to_message and message.reply_to_message.text:
-        text = message.reply_to_message.text
+    replied_txt = (message.reply_to_message.text or message.reply_to_message.caption) if message.reply_to_message else None
+    if replied_txt:
+        text = replied_txt
     elif len(message.command) > 1:
-        text = message.text.split(None, 1)[1]
+        parts = (message.text or message.caption or "").split(None, 1)
+        if len(parts) < 2:
+            return await message.reply_text("❌ Please provide some text to write.")
+        text = parts[1]
     else:
         return await message.reply_text(
             "❌ Please provide some text to write.\n\nUse `/write your message` or reply to a message.",

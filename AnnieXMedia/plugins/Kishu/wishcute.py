@@ -37,7 +37,8 @@ async def wish(_, m):
     except Exception:
         return await m.reply_text("⚠️ Couldn't fetch animation, try again later.")
 
-    text = _clean_md(m.text.split(None, 1)[1][:500])
+    raw_parts = (m.text or m.caption or "").split(None, 1)
+    text = _clean_md((raw_parts[1] if len(raw_parts) > 1 else "")[:500])
     wish_count = random.randint(1, 100)
     name = _clean_md((m.from_user.first_name if m.from_user else "User") or "User")
 

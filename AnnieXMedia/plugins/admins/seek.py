@@ -19,7 +19,7 @@ from config import BANNED_USERS
 async def seek_comm(cli, message: Message, _, chat_id):
     if len(message.command) == 1:
         return await message.reply_text(_["admin_20"])
-    query = message.text.split(None, 1)[1].strip()
+    query = message.command[1].strip()
     if not query.isnumeric():
         return await message.reply_text(_["admin_21"])
     playing = db.get(chat_id)

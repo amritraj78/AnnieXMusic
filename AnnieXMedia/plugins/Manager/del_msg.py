@@ -88,7 +88,7 @@ async def _fast_clear_history(assistant, chat_id) -> bool:
     except ChatAdminRequired:
         return False
     except FloodWait as e:
-        await asyncio.sleep(e.value)
+        await asyncio.sleep(min(int(e.value), 60))
         try:
             await assistant.delete_chat_history(chat_id, revoke=True)
             return True
@@ -106,13 +106,15 @@ async def _fallback_batch_delete(assistant, chat_id, skip_ids=set(), concurrency
     async def _deleter(ids):
         nonlocal count
         async with sem:
-            while True:
+            for attempt in range(3):
                 try:
                     await assistant.delete_messages(chat_id, ids)
                     count += len(ids)
                     break
                 except FloodWait as e:
-                    await asyncio.sleep(e.value)
+                    if attempt == 2:
+                        break
+                    await asyncio.sleep(min(int(e.value), 60))
                 except ChatAdminRequired:
                     raise
                 except Exception as e:

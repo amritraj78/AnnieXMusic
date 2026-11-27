@@ -98,7 +98,7 @@ async def approve_join_request(client, chat_join_request: ChatJoinRequest):
             except FloodWait as e:
                 if attempt == max_retries - 1:
                     return
-                await asyncio.sleep(e.value)
+                await asyncio.sleep(min(int(e.value), 60))
             except (ChatAdminRequired, PeerIdInvalid):
                 return
 

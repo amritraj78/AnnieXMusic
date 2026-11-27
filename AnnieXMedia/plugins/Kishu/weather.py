@@ -25,7 +25,8 @@ async def weather_command(client: Client, message: Message):
             parse_mode=enums.ParseMode.HTML
         )
 
-    query = message.text.split(maxsplit=1)[1].strip()
+    parts = (message.text or message.caption or "").split(maxsplit=1)
+    query = parts[1].strip() if len(parts) > 1 else ""
     if not query or len(query) > 120:
         return await message.reply_text(
             "❌ <b>Please enter a valid city name.</b>",

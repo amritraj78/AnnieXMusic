@@ -16,7 +16,10 @@ async def style_buttons(c, m, cb=False):
         if len(m.command) < 2:
             return await m.reply("❌ Please provide text to style.\n\nExample: `/font Hello World!`")
         message = m
-        text = m.text.split(" ", 1)[1][:1500].replace("`", "'")
+        parts = (m.text or m.caption or "").split(None, 1)
+        if len(parts) < 2:
+            return await m.reply("❌ Please provide text to style.\n\nExample: `/font Hello World!`")
+        text = parts[1][:1500].replace("`", "'")
 
     buttons = [
         [
@@ -167,13 +170,13 @@ async def style(c, m):
         return await m.message.reply("❌ Unknown style type.")
 
     text = None
-    if m.message.reply_to_message and m.message.reply_to_message.text:
-        try:
-            text = m.message.reply_to_message.text.split(" ", 1)[1]
-        except IndexError:
-            text = m.message.reply_to_message.text
-    elif m.message.text:
-        text = m.message.text.replace("`", "")
+    replied = m.message.reply_to_message
+    replied_txt = (replied.text or replied.caption) if replied else None
+    if replied_txt:
+        parts = replied_txt.split(None, 1)
+        text = parts[1] if len(parts) > 1 and replied_txt.startswith(("/", ".")) else replied_txt
+    elif m.message.text or m.message.caption:
+        text = (m.message.text or m.message.caption or "").replace("`", "")
 
     if not text:
         return await m.message.reply("❌ No text found to stylize.")

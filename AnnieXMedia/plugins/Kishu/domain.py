@@ -105,7 +105,8 @@ async def domain_lookup(_, message):
     if len(message.command) < 2:
         return await message.reply("Please provide a domain name. Example: `/domain heroku.com`")
 
-    domain_name = message.text.split(maxsplit=1)[1].strip()
+    parts = (message.text or message.caption or "").split(maxsplit=1)
+    domain_name = parts[1].strip() if len(parts) > 1 else ""
     if len(domain_name) > 253 or " " in domain_name:
         return await message.reply("⚠️ Please provide a valid domain name.")
     status = await message.reply("🔎 Looking up domain...")

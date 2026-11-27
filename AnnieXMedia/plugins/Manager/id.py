@@ -23,7 +23,7 @@ async def get_id(client, message: Message):
 
     if len(message.command) == 2:
         try:
-            target = message.text.split(maxsplit=1)[1]
+            target = message.command[1]
             tgt_user = await client.get_users(target)
             out.append(f"**[ᴜsᴇʀ ɪᴅ:](tg://user?id={tgt_user.id})** `{tgt_user.id}`")
         except Exception:

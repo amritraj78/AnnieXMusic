@@ -86,7 +86,7 @@ async def safe_edit(msg: Message, text: str, reply_markup=None):
         except FloodWait as e:
             if attempt == max_retries - 1:
                 break
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(min(int(e.value), 60))
         except Exception:
             break
 
@@ -110,7 +110,7 @@ def generate_group_keyboard(chat_id: int):
 @app.on_message(filters.command(["zombies"]) & (filters.private | filters.group))
 async def zombie_handler(_: Client, message: Message):
     user_id = message.from_user.id if message.from_user else 0
-    args = message.text.split()
+    args = (message.text or message.caption or "").split()
     target_id = None
 
     if len(args) > 1:

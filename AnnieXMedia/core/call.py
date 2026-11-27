@@ -623,8 +623,9 @@ class Call:
                             reply_markup=InlineKeyboardMarkup(button),
                         )
                     except FloodWait as e:
-                        LOGGER(__name__).warning(f"FloodWait: Sleeping for {e.value}")
-                        await asyncio.sleep(e.value)
+                        wait_s = min(int(e.value), 60)
+                        LOGGER(__name__).warning(f"FloodWait: Sleeping for {wait_s}s (raw={e.value})")
+                        await asyncio.sleep(wait_s)
                         try:
                             run = await app.send_photo(
                                 chat_id=original_chat_id,

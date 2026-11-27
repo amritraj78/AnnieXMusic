@@ -141,7 +141,8 @@ async def set_title(_, message: Message):
 
     title = None
     if len(message.command) > 1:
-        title = message.text.split(None, 1)[1].strip()
+        parts = (message.text or message.caption or "").split(None, 1)
+        title = parts[1].strip() if len(parts) > 1 else None
     elif message.reply_to_message and getattr(message.reply_to_message, "text", None):
         title = message.reply_to_message.text.strip()
 
@@ -164,7 +165,8 @@ async def set_description(_, message: Message):
 
     desc = None
     if len(message.command) > 1:
-        desc = message.text.split(None, 1)[1].strip()
+        parts = (message.text or message.caption or "").split(None, 1)
+        desc = parts[1].strip() if len(parts) > 1 else None
     elif message.reply_to_message and getattr(message.reply_to_message, "text", None):
         desc = message.reply_to_message.text.strip()
 

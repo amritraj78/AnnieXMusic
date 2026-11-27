@@ -103,7 +103,7 @@ async def list_admins(client, message: Message):
         await client.send_message(message.chat.id, txt, parse_mode=enums.ParseMode.HTML)
 
     except FloodWait as e:
-        await asyncio.sleep(e.value)
+        await asyncio.sleep(min(int(e.value), 60))
     except (ChannelInvalid, ChatAdminRequired):
         await message.reply_text(
             "❌ <i>I need admin rights to list admins here.</i>",
@@ -158,7 +158,7 @@ async def list_bots(client, message: Message):
         await client.send_message(message.chat.id, txt, parse_mode=enums.ParseMode.HTML)
 
     except FloodWait as e:
-        await asyncio.sleep(e.value)
+        await asyncio.sleep(min(int(e.value), 60))
     except (ChannelInvalid, ChatAdminRequired):
         await message.reply_text(
             "❌ <i>I need admin rights to list bots here.</i>",

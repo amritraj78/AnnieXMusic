@@ -50,8 +50,9 @@ async def start_pm(client, message: Message, _):
         except Exception:
             pass
 
-    if len(message.text.split()) > 1:
-        name = message.text.split(None, 1)[1]
+    parts = (message.text or message.caption or "").split(None, 1)
+    if len(parts) > 1:
+        name = parts[1]
 
         if name == "webapp":
             from AnnieXMedia.plugins.tools.webapp import build_private_webapp_markup

@@ -27,9 +27,10 @@ def get_random_message(love_percentage):
 
 @app.on_message(filters.command("love", prefixes="/"))
 async def love_command(client, message):
-    if not message.text:
+    raw_text = message.text or message.caption or ""
+    if not raw_text:
         return
-    parts = message.text.split()
+    parts = raw_text.split()
     args = parts[1:]
     if len(args) >= 2:
         name1 = args[0].strip()

@@ -252,7 +252,7 @@ def isArgInt(txt) -> list:
 # ---------------------------------------------------------------------------------------------------
 @app.on_message(filters.command("q") & filters.reply)
 async def msg_quotly_cmd(self: Client, ctx: Message):
-    args = ctx.text.split()[1:]
+    args = (ctx.text or ctx.caption or "").split()[1:]
 
     is_reply = False
     count = 1

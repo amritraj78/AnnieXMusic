@@ -64,7 +64,7 @@ async def play_command(
             _["play_2"].format(channel) if channel else random.choice(AYU)
         )
     except FloodWait as e:
-        await asyncio.sleep(e.value)
+        await asyncio.sleep(min(int(e.value), 60))
         mystic = await message.reply_text(
             _["play_2"].format(channel) if channel else random.choice(AYU)
         )
@@ -76,8 +76,12 @@ async def play_command(
 
     plist_id, plist_type, spotify, slider = None, None, None, None
     internal_type, log_label = None, None
-    user_id = message.from_user.id
-    user_name = message.from_user.first_name
+    user_id = message.from_user.id if message.from_user else message.chat.id
+    user_name = (
+        message.from_user.first_name
+        if message.from_user and message.from_user.first_name
+        else (message.chat.title or "Admin")
+    )
 
     audio_telegram = (
         (message.reply_to_message.audio or message.reply_to_message.voice)
@@ -418,7 +422,8 @@ async def play_command(
             )
 
         slider = True
-        query = message.text.split(None, 1)[1]
+        raw_parts = (message.text or message.caption or "").split(None, 1)
+        query = raw_parts[1] if len(raw_parts) > 1 else ""
         if "-v" in query:
             query = query.replace("-v", "")
 
@@ -602,7 +607,7 @@ async def play_music(client, CallbackQuery, _):
                 _["play_2"].format(channel) if channel else random.choice(AYU)
             )
         except FloodWait as e:
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(min(int(e.value), 60))
             mystic = await CallbackQuery.message.reply_text(
                 _["play_2"].format(channel) if channel else random.choice(AYU)
             )
@@ -698,7 +703,7 @@ async def play_playlists_command(client, CallbackQuery, _):
                 _["play_2"].format(channel) if channel else random.choice(AYU)
             )
         except FloodWait as e:
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(min(int(e.value), 60))
             mystic = await CallbackQuery.message.reply_text(
                 _["play_2"].format(channel) if channel else random.choice(AYU)
             )

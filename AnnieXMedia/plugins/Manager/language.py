@@ -50,8 +50,11 @@ async def langs_command(client, message: Message, _):
     try:
         await message.reply_text(_["lang_1"], reply_markup=keyboard)
     except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await message.reply_text(_["lang_1"], reply_markup=keyboard)
+        await asyncio.sleep(min(int(e.value), 60))
+        try:
+            await message.reply_text(_["lang_1"], reply_markup=keyboard)
+        except Exception:
+            pass
 
 
 @app.on_callback_query(filters.regex(r"^(?:LG|LANGUAGE_SETTINGS)$") & ~BANNED_USERS)
@@ -67,8 +70,11 @@ async def languagecb(client, CallbackQuery: CallbackQuery, _):
     try:
         await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
     except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await asyncio.sleep(min(int(e.value), 60))
+        try:
+            await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        except Exception:
+            pass
     except Exception:
         pass
 
@@ -97,7 +103,10 @@ async def language_markup(client, CallbackQuery: CallbackQuery, _):
     try:
         await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
     except FloodWait as e:
-        await asyncio.sleep(e.value)
-        await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        await asyncio.sleep(min(int(e.value), 60))
+        try:
+            await CallbackQuery.edit_message_reply_markup(reply_markup=keyboard)
+        except Exception:
+            pass
     except Exception:
         pass
