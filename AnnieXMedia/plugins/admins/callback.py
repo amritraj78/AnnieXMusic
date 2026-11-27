@@ -1,16 +1,19 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 import random
 from pyrogram import filters
-from pyrogram.types import CallbackQuery, InlineKeyboardMarkup, LinkPreviewOptions
+from pyrogram.types import CallbackQuery, InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions
 from config import (
     BANNED_USERS,
-    lyrical,
+    BOT_USERNAME,
     SOUNCLOUD_IMG_URL,
     STREAM_IMG_URL,
     SUPPORT_CHAT,
     TELEGRAM_AUDIO_URL,
     TELEGRAM_VIDEO_URL,
+    confirmer,
+    lyrical,
 )
 from strings import get_string
 from AnnieXMedia import YouTube, app
@@ -21,6 +24,7 @@ from AnnieXMedia.utils.database import (
     get_assistant,
     get_cmode,
     get_lang,
+    get_upvote_count,
     is_active_chat,
     is_music_playing,
     music_off,
@@ -35,6 +39,7 @@ from AnnieXMedia.utils.thumbnails import get_thumb
 
 
 checker = {}
+voter: dict[int, dict[int, set[int]]] = {}
 
 
 def parse_chat_info(chat_info: str):
@@ -66,28 +71,15 @@ async def unban_assistant(_, callback: CallbackQuery, _lang):
         )
 
 
-@app.on_callback_query(filters.regex("stream_admin") & ~BANNED_USERS)
-@ActualAdminCB
-async def manage_callback(client, callback: CallbackQuery, _):
-    parts = (callback.data or "").strip().split(None, 1)
-    if len(parts) < 2 or "|" not in parts[1]:
-        return
-    command, chat_info = parts[1].split("|", 1)
-    try:
-        chat_id, counter = parse_chat_info(chat_info)
-    except ValueError:
-        return
-    msg_chat_id = callback.message.chat.id if callback.message and callback.message.chat else 0
-    allowed_chats = {msg_chat_id}
-    cmode_chat = await get_cmode(msg_chat_id)
-    if cmode_chat:
-        allowed_chats.add(cmode_chat)
-    if chat_id not in allowed_chats:
-        return await callback.answer("Unauthorized chat control.", show_alert=True)
-    if not await is_active_chat(chat_id):
-        return await callback.answer(_["general_5"], show_alert=True)
-    user_mention = callback.from_user.mention if callback.from_user else "Admin"
-    
+async def _execute_admin_action(
+    callback: CallbackQuery,
+    _,
+    chat_id: int,
+    command: str,
+    user_mention: str,
+    *,
+    delete_panel: bool = True,
+):
     if command == "Pause":
         if not await is_music_playing(chat_id):
             return await callback.answer(_["admin_1"], show_alert=True)
@@ -109,7 +101,11 @@ async def manage_callback(client, callback: CallbackQuery, _):
         await StreamController.stop_stream(chat_id)
         await set_loop(chat_id, 0)
         await callback.message.reply_text(_["admin_5"].format(user_mention), reply_markup=close_markup(_))
-        await callback.message.delete()
+        if delete_panel and callback.message:
+            try:
+                await callback.message.delete()
+            except Exception:
+                pass
 
     elif command == "Loop":
         await callback.answer()
@@ -137,6 +133,103 @@ async def manage_callback(client, callback: CallbackQuery, _):
 
     else:
         await handle_seek(callback, _, chat_id, command, user_mention)
+
+
+async def _is_authorized_chat(callback: CallbackQuery, chat_id: int) -> bool:
+    msg_chat_id = callback.message.chat.id if callback.message and callback.message.chat else 0
+    allowed_chats = {msg_chat_id}
+    cmode_chat = await get_cmode(msg_chat_id)
+    if cmode_chat:
+        allowed_chats.add(cmode_chat)
+    return chat_id in allowed_chats
+
+
+@app.on_callback_query(filters.regex("stream_admin") & ~BANNED_USERS)
+@ActualAdminCB
+async def manage_callback(client, callback: CallbackQuery, _):
+    parts = (callback.data or "").strip().split(None, 1)
+    if len(parts) < 2 or "|" not in parts[1]:
+        return
+    command, chat_info = parts[1].split("|", 1)
+    try:
+        chat_id, counter = parse_chat_info(chat_info)
+    except ValueError:
+        return
+    if not await _is_authorized_chat(callback, chat_id):
+        return await callback.answer("Unauthorized chat control.", show_alert=True)
+    if not await is_active_chat(chat_id):
+        return await callback.answer(_["general_5"], show_alert=True)
+    user_mention = callback.from_user.mention if callback.from_user else "Admin"
+    await _execute_admin_action(callback, _, chat_id, command, user_mention)
+
+
+@app.on_callback_query(filters.regex(r"^(?:ADMIN\s+)?UpVote\|") & ~BANNED_USERS)
+async def upvote_callback(client, callback: CallbackQuery):
+    if not callback.from_user or not callback.message or not callback.message.chat:
+        return await callback.answer("Action not allowed.", show_alert=True)
+    try:
+        lang = await get_lang(callback.message.chat.id)
+        _ = get_string(lang)
+    except Exception:
+        _ = get_string("en")
+
+    payload = (callback.data or "").split("|", 1)[1] if "|" in (callback.data or "") else ""
+    if "_" not in payload:
+        return await callback.answer("Invalid vote payload.", show_alert=True)
+    raw_cid, mode = payload.rsplit("_", 1)
+    try:
+        chat_id = int(raw_cid)
+    except ValueError:
+        return await callback.answer("Invalid chat target.", show_alert=True)
+
+    if not await _is_authorized_chat(callback, chat_id):
+        return await callback.answer("Unauthorized chat control.", show_alert=True)
+    if not await is_active_chat(chat_id):
+        return await callback.answer(_["general_5"], show_alert=True)
+
+    msg_id = callback.message.id
+    playing = db.get(chat_id)
+    track_ref = (confirmer.get(chat_id) or {}).get(msg_id)
+    if track_ref and playing:
+        if track_ref.get("vidid") != playing[0].get("vidid") or track_ref.get("file") != playing[0].get("file"):
+            return await callback.answer("This vote prompt has expired.", show_alert=True)
+
+    needed = max(1, int(await get_upvote_count(chat_id)))
+    chat_voters = voter.setdefault(chat_id, {})
+    if len(chat_voters) > 256:
+        chat_voters.clear()
+    voters = chat_voters.setdefault(msg_id, set())
+    uid = callback.from_user.id
+    if uid in voters:
+        voters.remove(uid)
+        await callback.answer(f"Vote removed ({len(voters)}/{needed}).")
+    else:
+        voters.add(uid)
+        if len(voters) < needed:
+            await callback.answer(f"Voted ({len(voters)}/{needed}).")
+
+    if len(voters) < needed:
+        try:
+            await callback.edit_message_reply_markup(
+                reply_markup=InlineKeyboardMarkup(
+                    [[InlineKeyboardButton(text=f"ᴠᴏᴛᴇ ({len(voters)}/{needed})", callback_data=callback.data)]]
+                )
+            )
+        except Exception:
+            pass
+        return
+
+    chat_voters.pop(msg_id, None)
+    if chat_id in confirmer:
+        confirmer[chat_id].pop(msg_id, None)
+    await _execute_admin_action(
+        callback,
+        _,
+        chat_id,
+        mode,
+        callback.from_user.mention,
+        delete_panel=True,
+    )
 
 
 async def _update_stream_card(callback: CallbackQuery, text_msg: str, reply_markup=None):
@@ -168,8 +261,9 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
                 await callback.answer()
                 await _update_stream_card(callback, text_msg)
                 try:
+                    safe_chat = html.escape(callback.message.chat.title or "Chat")
                     await callback.message.reply_text(
-                        _["admin_6"].format(user_mention, callback.message.chat.title or "Chat"),
+                        _["admin_6"].format(user_mention, safe_chat),
                         reply_markup=close_markup(_),
                     )
                 except Exception:
@@ -189,6 +283,9 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
     current_track = playlist[0]
     queued = current_track["file"]
     title = current_track["title"].title()
+    safe_title = html.escape(title)
+    safe_short_title = html.escape(title[:23])
+    bot_user = getattr(app, "username", None) or BOT_USERNAME
     user = current_track["by"]
     duration = current_track["dur"]
     streamtype = current_track["streamtype"]
@@ -206,7 +303,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         n, new_link = await YouTube.video(videoid, True)
         if n == 0:
             return await callback.message.reply_text(
-                _["admin_7"].format(title),
+                _["admin_7"].format(safe_title),
                 reply_markup=close_markup(_)
             )
         try:
@@ -221,7 +318,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         img = await get_thumb(videoid)
         run = await callback.message.reply_photo(
             photo=img,
-            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
+            caption=_["stream_1"].format(f"https://t.me/{bot_user}?start=info_{videoid}", safe_short_title, duration, user),
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         db[chat_id][0]["mystic"] = run
@@ -246,7 +343,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
         img = await get_thumb(videoid)
         run = await callback.message.reply_photo(
             photo=img,
-            caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
+            caption=_["stream_1"].format(f"https://t.me/{bot_user}?start=info_{videoid}", safe_short_title, duration, user),
             reply_markup=InlineKeyboardMarkup(buttons)
         )
         db[chat_id][0]["mystic"] = run
@@ -285,7 +382,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             buttons = stream_markup(_, chat_id)
             run = await callback.message.reply_photo(
                 photo=(TELEGRAM_AUDIO_URL if str(streamtype) == "audio" else TELEGRAM_VIDEO_URL),
-                caption=_["stream_1"].format(SUPPORT_CHAT, title[:23], duration, user),
+                caption=_["stream_1"].format(SUPPORT_CHAT, safe_short_title, duration, user),
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             db[chat_id][0]["mystic"] = run
@@ -294,7 +391,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             buttons = stream_markup(_, chat_id)
             run = await callback.message.reply_photo(
                 photo=(SOUNCLOUD_IMG_URL if str(streamtype) == "audio" else TELEGRAM_VIDEO_URL),
-                caption=_["stream_1"].format(SUPPORT_CHAT, title[:23], duration, user),
+                caption=_["stream_1"].format(SUPPORT_CHAT, safe_short_title, duration, user),
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             db[chat_id][0]["mystic"] = run
@@ -304,7 +401,7 @@ async def handle_skip_replay(callback: CallbackQuery, _, chat_id: int, command: 
             img = await get_thumb(videoid)
             run = await callback.message.reply_photo(
                 photo=img,
-                caption=_["stream_1"].format(f"https://t.me/{app.username}?start=info_{videoid}", title[:23], duration, user),
+                caption=_["stream_1"].format(f"https://t.me/{bot_user}?start=info_{videoid}", safe_short_title, duration, user),
                 reply_markup=InlineKeyboardMarkup(buttons)
             )
             db[chat_id][0]["mystic"] = run
@@ -365,8 +462,8 @@ async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, us
         db[chat_id][0]["played"] -= duration_to_skip
     else:
         db[chat_id][0]["played"] += duration_to_skip
-    seek_message = _["admin_25"].format(seconds_to_min(to_seek))
-    await mystic.edit_text(f"{seek_message}\n\nᴄʜᴀɴɢᴇs ᴅᴏɴᴇ ʙʏ : {user_mention} !")
+    seek_message = _["admin_25"].format(seconds_to_min(to_seek), user_mention)
+    await mystic.edit_text(seek_message)
 
 
 async def markup_timer():

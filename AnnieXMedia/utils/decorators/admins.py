@@ -91,7 +91,7 @@ def AdminRightsCheck(mystic):
                                     [
                                         InlineKeyboardButton(
                                             text="ᴠᴏᴛᴇ",
-                                            callback_data=f"ADMIN  UpVote|{chat_id}_{MODE}",
+                                            callback_data=f"UpVote|{chat_id}_{MODE}",
                                         ),
                                     ]
                                 ]
