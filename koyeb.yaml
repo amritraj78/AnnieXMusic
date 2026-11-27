@@ -1,10 +1,10 @@
 # Koyeb Free Plan Configuration
-# Deploy AnnieXMusic on Koyeb Free Nano Instance
+# Deploy AnnieXMusic on Koyeb Free Instance (512MB RAM)
 name: anniexmusic
 services:
   - name: anniexmusic
     type: web
-    instance_type: nano
+    instance_type: free
     regions:
       - fra
     ports:

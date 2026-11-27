@@ -1,10 +1,10 @@
 FROM python:3.12-slim
 
 RUN apt-get update && \
-    apt-get install -y --no-install-recommends git ffmpeg curl unzip && \
+    apt-get install -y --no-install-recommends ca-certificates git ffmpeg curl unzip && \
     rm -rf /var/lib/apt/lists/* && \
-    curl -fsSL https://deno.land/install.sh | sh && \
-    ln -s /root/.deno/bin/deno /usr/local/bin/deno
+    curl -fsSL https://deno.land/install.sh | CI=1 DENO_INSTALL=/usr/local sh && \
+    deno --version
 
 WORKDIR /app
 
