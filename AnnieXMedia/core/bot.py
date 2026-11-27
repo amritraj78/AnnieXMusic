@@ -1,9 +1,11 @@
 # Authored By Certified Coders © 2025
+import html
 import sys
 from pyrogram import Client, errors
 from pyrogram.enums import ChatMemberStatus
 
 import config
+from AnnieXMedia.core.security import redact_secrets
 from ..logging import LOGGER
 
 
@@ -36,8 +38,8 @@ class MusicBotClient(Client):
                 (
                     f"<u><b>» {self.mention} ʙᴏᴛ sᴛᴀʀᴛᴇᴅ :</b></u>\n\n"
                     f"ɪᴅ : <code>{self.id}</code>\n"
-                    f"ɴᴀᴍᴇ : {self.name}\n"
-                    f"ᴜsᴇʀɴᴀᴍᴇ : @{self.username}"
+                    f"ɴᴀᴍᴇ : {html.escape(self.name or '')}\n"
+                    f"ᴜsᴇʀɴᴀᴍᴇ : @{html.escape(self.username or '')}"
                 ),
             )
         except (errors.ChannelInvalid, errors.PeerIdInvalid):
@@ -53,7 +55,7 @@ class MusicBotClient(Client):
                 LOGGER(__name__).error("❌ Promote the bot as admin in the log group/channel.")
                 sys.exit()
         except Exception as e:
-            LOGGER(__name__).warning(f"⚠️ Could not check admin status in log group: {e}")
+            LOGGER(__name__).warning(f"⚠️ Could not check admin status in log group: {redact_secrets(str(e))}")
 
         if config.WEBAPP_URL.startswith("https://"):
             try:
@@ -62,6 +64,6 @@ class MusicBotClient(Client):
                 await set_webapp_menu_button(self, f"{config.WEBAPP_URL}/app")
                 LOGGER(__name__).info(f"🌐 Telegram WebApp Menu Button set to {config.WEBAPP_URL}/app")
             except Exception as e:
-                LOGGER(__name__).warning(f"⚠️ Could not set WebApp Menu Button: {e}")
+                LOGGER(__name__).warning(f"⚠️ Could not set WebApp Menu Button: {redact_secrets(str(e))}")
 
         LOGGER(__name__).info(f"✅ Music Bot started as {self.name} (@{self.username})")

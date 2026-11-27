@@ -5,6 +5,19 @@ import subprocess
 from PIL import Image
 from pyrogram import Client, filters
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
+
+_LOGGER = LOGGER(__name__)
+_MAX_STICKER_BYTES = 20 * 1024 * 1024
+
+
+def _cleanup_tiny(*paths: str | None) -> None:
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
 
 
 def _process_tiny_image(ik: str, base_bg_path: str, out_file: str) -> bool:
@@ -50,7 +63,7 @@ def _process_tiny_image(ik: str, base_bg_path: str, out_file: str) -> bool:
         back_im.save(out_file, "WEBP", quality=95)
         return True
     except Exception as e:
-        print(f"[Tiny Error] {e}")
+        _LOGGER.warning("[Tiny Error] %s", e)
         return False
     finally:
         for obj in (im1, im, k, back_im):
@@ -71,6 +84,10 @@ async def tiny_sticker(client, message):
     reply = message.reply_to_message
     if not (reply and reply.sticker):
         return await message.reply("Please reply to a sticker")
+    if reply.sticker.is_animated:
+        return await message.reply("❌ Animated .tgs stickers are not supported.")
+    if (reply.sticker.file_size or 0) > _MAX_STICKER_BYTES:
+        return await message.reply("❌ Sticker exceeds 20MB limit.")
 
     kontol = await message.reply("Processing please wait...")
     os.makedirs("cache", exist_ok=True)
@@ -97,9 +114,4 @@ async def tiny_sticker(client, message):
         await kontol.edit_text(f"❌ Error: {e}")
 
     finally:
-        for path in (ik, out_file):
-            if path and os.path.exists(path):
-                try:
-                    os.remove(path)
-                except Exception:
-                    pass
+        await asyncio.to_thread(_cleanup_tiny, ik, out_file)

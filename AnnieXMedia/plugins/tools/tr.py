@@ -14,10 +14,10 @@ async def translate(_, message: Message):
     if not reply or not (reply.text or reply.caption):
         return await message.reply_text("📌 ʀᴇᴘʟʏ ᴛᴏ ᴀ ᴛᴇxᴛ ᴏʀ ᴄᴀᴘᴛɪᴏɴ ᴛᴏ ᴛʀᴀɴsʟᴀᴛᴇ.")
 
-    content = reply.text or reply.caption
+    content = (reply.text or reply.caption)[:4000]
 
     try:
-        if len(message.command) > 1:
+        if len(message.command) > 1 and message.text:
             arg = message.text.split(maxsplit=1)[1].strip().lower()
             if "//" in arg:
                 source_lang, target_lang = arg.split("//", 1)
@@ -29,9 +29,17 @@ async def translate(_, message: Message):
             target_lang = "en"
 
         result = await translator(content, sourcelang=source_lang, targetlang=target_lang)
+        translated = (getattr(result, "text", None) or "").strip()
+        if not translated:
+            return await message.reply_text("❌ **ᴛʀᴀɴsʟᴀᴛɪᴏɴ ʀᴇᴛᴜʀɴᴇᴅ ᴇᴍᴘᴛʏ ᴛᴇxᴛ.**")
+
+        safe_src = str(source_lang).replace("`", "'")[:32]
+        safe_dst = str(target_lang).replace("`", "'")[:32]
+        safe_txt = translated.replace("`", "'")[:3500]
         await message.reply_text(
-            f"🌐 **ᴛʀᴀɴsʟᴀᴛᴇᴅ:** `{source_lang}` ➜ `{target_lang}`\n\n"
-            f"`{result.text[:3500]}`"
+            f"🌐 **ᴛʀᴀɴsʟᴀᴛᴇᴅ:** `{safe_src}` ➜ `{safe_dst}`\n\n"
+            f"`{safe_txt}`"
         )
     except Exception as e:
-        await message.reply_text(f"❌ **ᴛʀᴀɴsʟᴀᴛɪᴏɴ ꜰᴀɪʟᴇᴅ:** `{str(e)}`")
+        safe_err = str(e).replace("`", "'")[:500]
+        await message.reply_text(f"❌ **ᴛʀᴀɴsʟᴀᴛɪᴏɴ ꜰᴀɪʟᴇᴅ:** `{safe_err}`")

@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import os
 from pyrogram import Client, filters
 from pyrogram.types import Message
@@ -8,16 +9,32 @@ from AnnieXMedia.misc import SUDOERS
 from AnnieXMedia.utils.admin_filters import admin_filter
 
 
+def _write_group_file(file_path: str, group_data: dict) -> None:
+    os.makedirs(os.path.dirname(file_path), exist_ok=True)
+    with open(file_path, "w", encoding="utf-8") as file:
+        for key, value in group_data.items():
+            file.write(f"{key}: {value}\n")
+
+
+def _cleanup_file(file_path: str | None) -> None:
+    if file_path and os.path.exists(file_path):
+        try:
+            os.remove(file_path)
+        except Exception:
+            pass
+
+
 @app.on_message(filters.command("givelink") & filters.group & admin_filter)
 async def give_link_command(client: Client, message: Message):
     try:
         link = await app.export_chat_invite_link(message.chat.id)
-        title = message.chat.title or "this chat"
+        title = (message.chat.title or "this chat").replace("`", "'")
         await message.reply_text(
             f"🔗 **ɪɴᴠɪᴛᴇ ʟɪɴᴋ ғᴏʀ** `{title}`:\n{link}"
         )
     except Exception as e:
-        await message.reply_text(f"❌ ᴇʀʀᴏʀ ɢᴇɴᴇʀᴀᴛɪɴɢ ʟɪɴᴋ:\n`{e}`")
+        safe_err = str(e).replace("`", "'")
+        await message.reply_text(f"❌ ᴇʀʀᴏʀ ɢᴇɴᴇʀᴀᴛɪɴɢ ʟɪɴᴋ:\n`{safe_err}`")
 
 
 @app.on_message(filters.command(["link", "invitelink"], prefixes=["/", "!", ".", "#", "?"]) & SUDOERS)
@@ -25,11 +42,12 @@ async def link_command_handler(client: Client, message: Message):
     if len(message.command) != 2:
         return await message.reply("**ᴜsᴀɢᴇ:** `/link <group_id>`")
 
-    group_id = message.command[1]
-    file_name = f"group_info_{group_id}.txt"
+    file_name = None
 
     try:
-        chat = await client.get_chat(int(group_id))
+        cid = int(message.command[1])
+        file_name = f"cache/group_info_{cid}_{message.id}.txt"
+        chat = await client.get_chat(cid)
         if not chat:
             return await message.reply("⚠️ **ᴄᴏᴜʟᴅ ɴᴏᴛ ғᴇᴛᴄʜ ɢʀᴏᴜᴘ ɪɴғᴏ.**")
 
@@ -56,24 +74,24 @@ async def link_command_handler(client: Client, message: Message):
             "has_protected_content": chat.has_protected_content,
         }
 
-        with open(file_name, "w", encoding="utf-8") as file:
-            for key, value in group_data.items():
-                file.write(f"{key}: {value}\n")
+        await asyncio.to_thread(_write_group_file, file_name, group_data)
 
+        safe_title = (chat.title or "Unknown").replace("`", "'")
+        caption = (
+            f"📂 **ɢʀᴏᴜᴘ ɪɴғᴏ ꜰᴏʀ** `{safe_title}`\n"
+            f"📌 **sᴄʀᴀᴘᴇᴅ ʙʏ:** @{app.username}"
+        )[:1024]
         await client.send_document(
             chat_id=message.chat.id,
             document=file_name,
-            caption=(
-                f"📂 **ɢʀᴏᴜᴘ ɪɴғᴏ ꜰᴏʀ** `{chat.title}`\n"
-                f"📌 **sᴄʀᴀᴘᴇᴅ ʙʏ:** @{app.username}"
-            ),
+            caption=caption,
         )
 
-    except (ValueError):
+    except ValueError:
         await message.reply("❌ **ɪɴᴠᴀʟɪᴅ ɢʀᴏᴜᴘ ɪᴅ. ᴘʟᴇᴀsᴇ ᴘʀᴏᴠɪᴅᴇ ᴀ ᴠᴀʟɪᴅ ɢʀᴏᴜᴘ ɪᴅ.**")
     except Exception as e:
-        await message.reply_text(f"❌ ᴇʀʀᴏʀ:\n`{str(e)}`")
+        safe_err = str(e).replace("`", "'")
+        await message.reply_text(f"❌ ᴇʀʀᴏʀ:\n`{safe_err}`")
 
     finally:
-        if os.path.exists(file_name):
-            os.remove(file_name)
+        await asyncio.to_thread(_cleanup_file, file_name)

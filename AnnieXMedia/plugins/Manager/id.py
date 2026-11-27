@@ -1,6 +1,6 @@
 # Authored By Certified Coders © 2025
 from pyrogram import filters
-from pyrogram.enums import ParseMode
+from pyrogram.enums import ChatType, ParseMode
 from pyrogram.types import LinkPreviewOptions, Message
 
 from AnnieXMedia import app
@@ -29,7 +29,7 @@ async def get_id(client, message: Message):
         except Exception:
             return await message.reply_text("**ᴛʜɪs ᴜsᴇʀ ᴅᴏᴇsɴ'ᴛ ᴇxɪsᴛ.**")
 
-    if chat.username and str(chat.type).lower() != "chattype.private" and "private" not in str(chat.type).lower():
+    if chat.username and chat.type != ChatType.PRIVATE:
         out.append(f"**[ᴄʜᴀᴛ ɪᴅ:](https://t.me/{chat.username})** `{chat.id}`")
     else:
         out.append(f"**ᴄʜᴀᴛ ɪᴅ:** `{chat.id}`")
@@ -47,8 +47,11 @@ async def get_id(client, message: Message):
             )
 
         if reply.forward_from_chat:
+            fwd_title = (reply.forward_from_chat.title or "Channel").translate(
+                str.maketrans({"*": "", "_": "", "[": "(", "]": ")", "`": "'"})
+            )
             out.append(
-                f"ᴛʜᴇ ғᴏʀᴡᴀʀᴅᴇᴅ ᴄʜᴀɴɴᴇʟ **{reply.forward_from_chat.title}** "
+                f"ᴛʜᴇ ғᴏʀᴡᴀʀᴅᴇᴅ ᴄʜᴀɴɴᴇʟ **{fwd_title}** "
                 f"ʜᴀs ɪᴅ `{reply.forward_from_chat.id}`"
             )
 
@@ -56,7 +59,7 @@ async def get_id(client, message: Message):
             out.append(f"ɪᴅ ᴏғ ᴛʜᴇ ʀᴇᴘʟɪᴇᴅ ᴄʜᴀᴛ/ᴄʜᴀɴɴᴇʟ: `{reply.sender_chat.id}`")
 
     await message.reply_text(
-        "\n".join(out),
+        "\n".join(out)[:4096],
         link_preview_options=LinkPreviewOptions(is_disabled=True),
         parse_mode=ParseMode.MARKDOWN,
     )

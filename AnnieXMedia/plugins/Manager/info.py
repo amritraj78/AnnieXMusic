@@ -29,8 +29,7 @@ def get_last_seen(status):
     }.get(status, "❓ ᴜɴᴋɴᴏᴡɴ")
 
 
-@app.on_message(filters.command(["info", "userinfo", "whois"]))
-async def whois_handler(_, message: Message):
+async def _send_whois(message: Message, _retried: bool = False):
     try:
         if message.reply_to_message:
             user = message.reply_to_message.from_user
@@ -91,9 +90,16 @@ async def whois_handler(_, message: Message):
     except PeerIdInvalid:
         await message.reply("🥀 ɪ ᴄᴏᴜʟᴅɴ'ᴛ ꜰɪɴᴅ ᴛʜᴀᴛ ᴜsᴇʀ.")
     except FloodWait as e:
-        await asyncio.sleep(e.value)
-        return await whois_handler(_, message)
+        if _retried:
+            return await message.reply(f"⏳ Rate limit exceeded. Wait {int(e.value)}s.")
+        await asyncio.sleep(min(int(e.value), 60))
+        return await _send_whois(message, _retried=True)
     except RPCError as e:
-        await message.reply(f"⚠️ ʀᴘᴄ ᴇʀʀᴏʀ:\n<code>{e}</code>")
+        await message.reply(f"⚠️ ʀᴘᴄ ᴇʀʀᴏʀ:\n<code>{html.escape(str(e))}</code>")
     except Exception as e:
-        await message.reply(f"🥀 ᴇʀʀᴏʀ:\n<code>{e}</code>")
+        await message.reply(f"🥀 ᴇʀʀᴏʀ:\n<code>{html.escape(str(e))}</code>")
+
+
+@app.on_message(filters.command(["info", "userinfo", "whois"]))
+async def whois_handler(_, message: Message):
+    return await _send_whois(message, _retried=False)

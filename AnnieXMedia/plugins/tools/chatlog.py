@@ -8,6 +8,9 @@ from typing import Optional
 
 from config import LOGGER_ID
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
+
+_LOGGER = LOGGER(__name__)
 
 BOT_INFO: Optional[types.User] = None
 BOT_ID: Optional[int] = None
@@ -36,28 +39,29 @@ async def _ensure_bot_info() -> None:
             BOT_INFO = await app.get_me()
             BOT_ID = BOT_INFO.id
         except Exception as e:
-            print(f"Failed to get bot info: {e}")
+            _LOGGER.warning("Failed to get bot info: %s", e)
 
 async def safe_send_photo(chat_id, photo, caption, reply_markup=None, max_retries=3):
+    safe_caption = (caption or "")[:1024]
     for attempt in range(max_retries):
         try:
             return await app.send_photo(
                 chat_id=chat_id,
                 photo=photo,
-                caption=caption,
+                caption=safe_caption,
                 reply_markup=reply_markup
             )
         except errors.FloodWait as e:
-            await asyncio.sleep(e.value + 1)
+            await asyncio.sleep(min(int(e.value), 60) + 1)
         except errors.ButtonUrlInvalid:
             return await app.send_photo(
                 chat_id=chat_id,
                 photo=photo,
-                caption=caption
+                caption=safe_caption
             )
         except Exception as e:
             if attempt == max_retries - 1:
-                print(f"Failed to send photo after {max_retries} attempts: {e}")
+                _LOGGER.warning("Failed to send photo after %s attempts: %s", max_retries, e)
                 raise
             await asyncio.sleep(1)
 
@@ -84,15 +88,19 @@ async def join_watcher(_, message: Message):
             try:
                 member_count = await app.get_chat_members_count(chat.id)
             except errors.FloodWait as fw:
-                await asyncio.sleep(fw.value + 1)
-                member_count = await app.get_chat_members_count(chat.id)
+                await asyncio.sleep(min(int(fw.value), 60) + 1)
+                try:
+                    member_count = await app.get_chat_members_count(chat.id)
+                except Exception:
+                    member_count = "?"
             except Exception:
                 pass
 
+            safe_title = (chat.title or "Unknown").replace("`", "'")
             caption = (
                 "📝 **ᴍᴜsɪᴄ ʙᴏᴛ ᴀᴅᴅᴇᴅ ɪɴ ᴀ ɴᴇᴡ ɢʀᴏᴜᴘ**\n\n"
                 "❅─────✧❅✦❅✧─────❅\n\n"
-                f"📌 **ᴄʜᴀᴛ ɴᴀᴍᴇ:** `{chat.title}`\n"
+                f"📌 **ᴄʜᴀᴛ ɴᴀᴍᴇ:** `{safe_title}`\n"
                 f"🍂 **ᴄʜᴀᴛ ɪᴅ:** `{chat.id}`\n"
                 f"🔐 **ᴄʜᴀᴛ ᴜsᴇʀɴᴀᴍᴇ:** @{chat.username if chat.username else 'Private'}\n"
                 f"🛰 **ᴄʜᴀᴛ ʟɪɴᴋ:** [ᴄʟɪᴄᴋ ʜᴇʀᴇ]({invite_link or 'https://t.me/'})\n"
@@ -113,7 +121,7 @@ async def join_watcher(_, message: Message):
                 reply_markup=reply_markup
             )
     except Exception as e:
-        print(f"Error in join_watcher: {e}")
+        _LOGGER.warning("Error in join_watcher: %s", e)
 
 @app.on_message(filters.left_chat_member)
 async def on_left_chat_member(_, message: Message):
@@ -127,14 +135,15 @@ async def on_left_chat_member(_, message: Message):
 
         remover = message.from_user.mention if message.from_user else "**ᴜɴᴋɴᴏᴡɴ ᴜsᴇʀ**"
         chat = message.chat
+        safe_title = (chat.title or "Unknown").replace("`", "'")
 
         text = (
             "✫ **<u>#ʟᴇғᴛ_ɢʀᴏᴜᴘ</u>** ✫\n\n"
-            f"📌 **ᴄʜᴀᴛ ɴᴀᴍᴇ:** `{chat.title}`\n"
+            f"📌 **ᴄʜᴀᴛ ɴᴀᴍᴇ:** `{safe_title}`\n"
             f"🆔 **ᴄʜᴀᴛ ɪᴅ:** `{chat.id}`\n"
             f"👤 **ʀᴇᴍᴏᴠᴇᴅ ʙʏ:** {remover}\n"
             f"🤖 **ʙᴏᴛ:** @{BOT_INFO.username}"
-        )
+        )[:4096]
 
         max_retries = 3
         for attempt in range(max_retries):
@@ -142,9 +151,9 @@ async def on_left_chat_member(_, message: Message):
                 await app.send_message(LOGGER_ID, text)
                 break
             except errors.FloodWait as e:
-                await asyncio.sleep(e.value + 1)
+                await asyncio.sleep(min(int(e.value), 60) + 1)
             except Exception as e:
                 if attempt == max_retries - 1:
-                    print(f"Failed to send left chat message after {max_retries} attempts: {e}")
+                    _LOGGER.warning("Failed to send left chat message after %s attempts: %s", max_retries, e)
     except Exception as e:
-        print(f"Error in on_left_chat_member: {e}")
+        _LOGGER.warning("Error in on_left_chat_member: %s", e)

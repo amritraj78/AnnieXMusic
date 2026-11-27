@@ -35,6 +35,8 @@ async def _is_participant(client, chat_id: int, user_id: int) -> bool:
 
 async def join_userbot(app, chat_id: int, chat_username: str = None) -> str:
     userbot = await get_assistant(chat_id)
+    if not userbot:
+        return "**❌ Assistant client not configured.**"
     try:
         member = await app.get_chat_member(chat_id, userbot.id)
         if member.status == ChatMemberStatus.BANNED:
@@ -68,13 +70,16 @@ async def join_userbot(app, chat_id: int, chat_username: str = None) -> str:
         except FloodWait as e:
             if attempt == max_retries - 1:
                 return f"**❌ Failed to add assistant after retries:** Flood wait exceeded."
-            await asyncio.sleep(e.value)
+            await asyncio.sleep(min(int(e.value), 60))
         except Exception as e:
-            return f"**❌ Failed to add assistant:** `{str(e)}`"
+            safe_err = str(e).replace("`", "'")
+            return f"**❌ Failed to add assistant:** `{safe_err}`"
 
 @app.on_chat_join_request()
 async def approve_join_request(client, chat_join_request: ChatJoinRequest):
     userbot = await get_assistant(chat_join_request.chat.id)
+    if not userbot or not chat_join_request.from_user:
+        return
     if chat_join_request.from_user.id != userbot.id:
         return
 
@@ -106,7 +111,7 @@ async def approve_join_request(client, chat_join_request: ChatJoinRequest):
 
 @app.on_message(
     filters.command(["userbotjoin", "assistantjoin"], prefixes=[".", "/"])
-    & (filters.group | filters.private)
+    & filters.group
     & (admin_filter | sudo_filter)
 )
 async def join_group(app, message):
@@ -115,7 +120,10 @@ async def join_group(app, message):
     try:
         me = await app.get_me()
         chat_member = await app.get_chat_member(chat_id, me.id)
-        if chat_member.status != ChatMemberStatus.ADMINISTRATOR:
+        if chat_member.status not in (
+            ChatMemberStatus.ADMINISTRATOR,
+            ChatMemberStatus.OWNER,
+        ):
             await status_message.edit_text("**❌ I need to be admin to invite the assistant.**")
             return
     except ChatAdminRequired:
@@ -141,6 +149,8 @@ async def leave_one(app, message):
     chat_id = message.chat.id
     try:
         userbot = await get_assistant(chat_id)
+        if not userbot:
+            return await message.reply("**❌ Assistant client not configured.**")
         try:
             member = await userbot.get_chat_member(chat_id, userbot.id)
             if member.status not in ACTIVE_STATUSES:
@@ -163,15 +173,17 @@ async def leave_one(app, message):
                 if attempt == max_retries - 1:
                     await message.reply("**❌ Failed to leave after retries: Flood wait exceeded.**")
                     return
-                await asyncio.sleep(e.value)
+                await asyncio.sleep(min(int(e.value), 60))
             except ChannelPrivate:
                 await message.reply("**❌ Error: This chat is not accessible or has been deleted.**")
                 return
             except Exception as e:
-                await message.reply(f"**❌ Failed to remove assistant:** `{str(e)}`")
+                safe_err = str(e).replace("`", "'")
+                await message.reply(f"**❌ Failed to remove assistant:** `{safe_err}`")
                 return
     except Exception as e:
-        await message.reply(f"**❌ Unexpected error:** `{str(e)}`")
+        safe_err = str(e).replace("`", "'")
+        await message.reply(f"**❌ Unexpected error:** `{safe_err}`")
 
 @app.on_message(filters.command("leaveall", prefixes=["."]) & dev_filter)
 async def leave_all(app, message):
@@ -180,6 +192,8 @@ async def leave_all(app, message):
     status_message = await message.reply("🔄 **Assistant is leaving all chats...**")
     try:
         userbot = await get_assistant(message.chat.id)
+        if not userbot:
+            return await status_message.edit_text("❌ **Assistant client not configured.**")
         async for dialog in userbot.get_dialogs():
             if dialog.chat.id in (config.LOGGER_ID, -1004478038866):
                 continue
@@ -193,21 +207,22 @@ async def leave_all(app, message):
                     if attempt == max_retries - 1:
                         failed += 1
                         break
-                    await asyncio.sleep(e.value)
+                    await asyncio.sleep(min(int(e.value), 60))
                 except Exception:
                     failed += 1
                     break
 
-            try:
-                await status_message.edit_text(
-                    f"**Leaving chats...**\n✅ Left: `{left}`\n❌ Failed: `{failed}`"
-                )
-            except ChatWriteForbidden:
-                pass
+            if (left + failed) == 1 or (left + failed) % 10 == 0:
+                try:
+                    await status_message.edit_text(
+                        f"**Leaving chats...**\n✅ Left: `{left}`\n❌ Failed: `{failed}`"
+                    )
+                except Exception:
+                    pass
             await asyncio.sleep(0.5)
     except FloodWait as e:
-        await asyncio.sleep(e.value)
-    except Exception as e:
+        await asyncio.sleep(min(int(e.value), 60))
+    except Exception:
         pass
     finally:
         try:
@@ -215,5 +230,5 @@ async def leave_all(app, message):
                 message.chat.id,
                 f"**✅ Left from:** `{left}` chats.\n**❌ Failed in:** `{failed}` chats.",
             )
-        except ChatWriteForbidden:
+        except Exception:
             pass

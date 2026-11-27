@@ -1,10 +1,11 @@
 # Authored By Certified Coders © 2025
 import random
-import httpx
+import aiohttp
 from pyrogram import Client, filters, enums
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup
 
 from AnnieXMedia import app
+from AnnieXMedia.core.http_pool import get_http_session
 from config import SUPPORT_CHAT
 
 SUPPORT_BTN = InlineKeyboardMarkup(
@@ -14,17 +15,21 @@ SUPPORT_BTN = InlineKeyboardMarkup(
 CUTE_VIDEO = "https://telegra.ph/file/528d0563175669e123a75.mp4"
 
 
+def _clean_md(text: str) -> str:
+    return (text or "").replace("[", "(").replace("]", ")").replace("`", "'")
+
+
 @app.on_message(filters.command("wish"))
 async def wish(_, m):
     if len(m.command) < 2:
         return await m.reply_text("❌ ᴀᴅᴅ ʏᴏᴜʀ ᴡɪꜱʜ ʙᴀʙʏ 🥀!")
 
     try:
-        async with httpx.AsyncClient(timeout=8.0) as client:
-            resp = await client.get("https://nekos.best/api/v2/happy")
-            if resp.status_code != 200:
+        client = await get_http_session()
+        async with client.get("https://nekos.best/api/v2/happy", timeout=aiohttp.ClientTimeout(total=8)) as resp:
+            if resp.status != 200:
                 raise Exception("API status error")
-            api = resp.json()
+            api = await resp.json(content_type=None)
             results = api.get("results", [])
             if not results:
                 raise Exception("Empty results")
@@ -32,9 +37,9 @@ async def wish(_, m):
     except Exception:
         return await m.reply_text("⚠️ Couldn't fetch animation, try again later.")
 
-    text = m.text.split(None, 1)[1]
+    text = _clean_md(m.text.split(None, 1)[1][:500])
     wish_count = random.randint(1, 100)
-    name = (m.from_user.first_name if m.from_user else "User") or "User"
+    name = _clean_md((m.from_user.first_name if m.from_user else "User") or "User")
 
     caption = (
         f"✨ ʜᴇʏ {name}!\n"
@@ -46,11 +51,11 @@ async def wish(_, m):
         await app.send_animation(
             chat_id=m.chat.id,
             animation=url,
-            caption=caption,
+            caption=caption[:1024],
             reply_markup=SUPPORT_BTN,
         )
     except Exception:
-        await m.reply_text(caption, reply_markup=SUPPORT_BTN)
+        await m.reply_text(caption[:4096], reply_markup=SUPPORT_BTN)
 
 
 @app.on_message(filters.command("cute"))
@@ -62,7 +67,8 @@ async def cute(_, message):
         target = message.from_user
 
     if target:
-        mention = f"[{target.first_name}](tg://user?id={target.id})"
+        safe_name = _clean_md(target.first_name or "User")
+        mention = f"[{safe_name}](tg://user?id={target.id})"
     else:
         mention = "User"
 

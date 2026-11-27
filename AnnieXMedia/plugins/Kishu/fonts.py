@@ -8,13 +8,15 @@ from AnnieXMedia import app
 @app.on_message(filters.command(["font", "fonts"]))
 async def style_buttons(c, m, cb=False):
     if cb:
+        if not m.message:
+            return await m.answer()
         message = m.message
-        text = message.text.replace("`", "")
+        text = (message.text or "").replace("`", "")
     else:
         if len(m.command) < 2:
             return await m.reply("❌ Please provide text to style.\n\nExample: `/font Hello World!`")
         message = m
-        text = m.text.split(" ", 1)[1]
+        text = m.text.split(" ", 1)[1][:1500].replace("`", "'")
 
     buttons = [
         [
@@ -56,7 +58,10 @@ async def style_buttons(c, m, cb=False):
     ]
 
     if cb:
-        await m.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        try:
+            await m.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        except Exception:
+            pass
     else:
         await m.reply_text(f"`{text}`", reply_markup=InlineKeyboardMarkup(buttons))
 
@@ -64,6 +69,8 @@ async def style_buttons(c, m, cb=False):
 
 @app.on_callback_query(filters.regex("^nxt"))
 async def nxt(c, m):
+    if not m.message:
+        return await m.answer()
     await m.answer()
     if m.data == "nxt":
         buttons = [
@@ -99,14 +106,19 @@ async def nxt(c, m):
             ],
             [InlineKeyboardButton("ᴄʟᴏsᴇ", callback_data="close_reply"), InlineKeyboardButton("ʙᴀᴄᴋ", callback_data="nxt+0")],
         ]
-        await m.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        try:
+            await m.message.edit_reply_markup(InlineKeyboardMarkup(buttons))
+        except Exception:
+            pass
     else:
         await style_buttons(c, m, cb=True)
 
-@app.on_callback_query(filters.regex("^style"))
+@app.on_callback_query(filters.regex(r"^style\+"))
 async def style(c, m):
+    if not m.message or "+" not in (m.data or ""):
+        return await m.answer()
     await m.answer()
-    _, style = m.data.split('+')
+    _, style = m.data.split("+", 1)
 
     style_map = {
         "typewriter": Fonts.typewriter,
@@ -166,16 +178,20 @@ async def style(c, m):
     if not text:
         return await m.message.reply("❌ No text found to stylize.")
 
-    stylized = cls(text)
-    await m.message.edit_text(f"`{stylized}`", reply_markup=m.message.reply_markup)
+    stylized = cls(text)[:3900].replace("`", "'")
+    try:
+        await m.message.edit_text(f"`{stylized}`", reply_markup=m.message.reply_markup)
+    except Exception:
+        pass
 
 
 @app.on_callback_query(filters.regex("^close_reply$"))
 async def close_reply_cb(c, m):
-    try:
-        await m.message.delete()
-    except Exception:
-        pass
+    if m.message:
+        try:
+            await m.message.delete()
+        except Exception:
+            pass
     try:
         await m.answer()
     except Exception:

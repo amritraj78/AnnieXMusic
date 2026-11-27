@@ -31,13 +31,18 @@ TEMPLATES = {
 }
 
 
+def _safe_md_label(label: str | None, fallback: str = "User") -> str:
+    raw = (label or fallback).strip() or fallback
+    return raw.translate(str.maketrans({"[": "(", "]": ")", "`": "'", "*": "", "_": ""}))
+
+
 def get_user_mention(message: Message) -> str:
     user = (message.reply_to_message.from_user if message.reply_to_message else None) or message.from_user
     if user:
-        return f"[{user.first_name}](tg://user?id={user.id})"
+        return f"[{_safe_md_label(user.first_name)}](tg://user?id={user.id})"
     sender_chat = (message.reply_to_message.sender_chat if message.reply_to_message else None) or message.sender_chat
     if sender_chat:
-        return f"[{sender_chat.title}](tg://user?id={sender_chat.id})"
+        return f"[{_safe_md_label(sender_chat.title, 'Channel')}](tg://user?id={sender_chat.id})"
     return "User"
 
 
@@ -59,7 +64,7 @@ async def handle_percentage_command(_, message: Message):
         await app.send_document(
             message.chat.id,
             media_url,
-            caption=text,
+            caption=text[:1024],
             reply_markup=BUTTON,
             reply_to_message_id=get_reply_id(message),
         )
@@ -67,7 +72,7 @@ async def handle_percentage_command(_, message: Message):
         try:
             await app.send_message(
                 message.chat.id,
-                text,
+                text[:4096],
                 reply_markup=BUTTON,
                 reply_to_message_id=get_reply_id(message),
             )

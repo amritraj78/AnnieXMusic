@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 from pyrogram import filters
 from pyrogram.types import Message
 
@@ -43,4 +44,4 @@ async def vc_info(client, message: Message):
         msg_lines.append(f"\n👥 Total: <b>{len(participants)}</b>")
         await message.reply_text("\n".join(msg_lines))
     except Exception as e:
-        await message.reply_text(f"❌ Failed to fetch VC info.\n<b>Error:</b> {e}")
+        await message.reply_text(f"❌ Failed to fetch VC info.\n<b>Error:</b> {html.escape(str(e))}")

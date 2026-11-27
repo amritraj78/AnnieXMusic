@@ -82,12 +82,24 @@ def _sync_drawText(image_path: str, text: str, output_file: str) -> str:
     return output_file
 
 
+_MAX_MEDIA_BYTES = 20 * 1024 * 1024
+
+
+def _cleanup_paths(*paths: str | None) -> None:
+    for path in paths:
+        if path and os.path.exists(path):
+            try:
+                os.remove(path)
+            except Exception:
+                pass
+
+
 @app.on_message(filters.command("mmf"))
 async def mmf(_, message: Message):
     chat_id = message.chat.id
     reply_message = message.reply_to_message
 
-    if len(message.text.split()) < 2:
+    if not message.text or len(message.text.split()) < 2:
         await message.reply_text("**Give me text after /mmf to memify.**")
         return
 
@@ -95,29 +107,38 @@ async def mmf(_, message: Message):
         await message.reply_text("❌ **Please reply to an image or sticker to memify.**")
         return
 
+    if reply_message.sticker:
+        if reply_message.sticker.is_animated or reply_message.sticker.is_video:
+            return await message.reply_text("❌ **Animated and video stickers are not supported.**")
+        if (reply_message.sticker.file_size or 0) > _MAX_MEDIA_BYTES:
+            return await message.reply_text("❌ **Sticker size exceeds 20MB limit.**")
+    elif reply_message.photo:
+        if (reply_message.photo.file_size or 0) > _MAX_MEDIA_BYTES:
+            return await message.reply_text("❌ **Image size exceeds 20MB limit.**")
+    elif reply_message.document:
+        mime = (reply_message.document.mime_type or "").lower()
+        if not mime.startswith("image/"):
+            return await message.reply_text("❌ **Please reply to an image or static sticker to memify.**")
+        if (reply_message.document.file_size or 0) > _MAX_MEDIA_BYTES:
+            return await message.reply_text("❌ **Image size exceeds 20MB limit.**")
+    else:
+        return await message.reply_text("❌ **Please reply to an image or static sticker to memify.**")
+
     msg = await message.reply_text("❄️")
-    text = message.text.split(None, 1)[1]
+    text = message.text.split(None, 1)[1][:300]
     file = None
     output_file = None
     try:
+        os.makedirs("cache", exist_ok=True)
         file = await app.download_media(reply_message)
         if not file:
             return await msg.edit("❌ **Could not download media.**")
 
-        output_file = f"memify_{chat_id}_{message.id}_{uuid.uuid4().hex[:6]}.webp"
+        output_file = f"cache/memify_{chat_id}_{message.id}_{uuid.uuid4().hex[:6]}.webp"
         await asyncio.to_thread(_sync_drawText, file, text, output_file)
         await app.send_document(chat_id, document=output_file)
         await msg.delete()
     except Exception as e:
         await msg.edit(f"❌ Failed to memify.\nError: {e}")
     finally:
-        if file and os.path.exists(file):
-            try:
-                os.remove(file)
-            except Exception:
-                pass
-        if output_file and os.path.exists(output_file):
-            try:
-                os.remove(output_file)
-            except Exception:
-                pass
+        await asyncio.to_thread(_cleanup_paths, file, output_file)

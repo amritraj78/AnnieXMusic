@@ -11,7 +11,7 @@ from AnnieXMedia import app
 
 
 def _in_group(msg: Message) -> bool:
-    return bool(msg.chat and msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP))
+    return bool(msg.chat and msg.chat.type in (ChatType.GROUP, ChatType.SUPERGROUP, ChatType.FORUM))
 
 
 def _mention_html(user) -> str:
@@ -124,6 +124,8 @@ async def list_bots(client, message: Message):
         async for b in client.get_chat_members(
             message.chat.id, filter=enums.ChatMembersFilter.BOTS
         ):
+            if not b.user:
+                continue
             is_admin = b.status in (
                 ChatMemberStatus.ADMINISTRATOR,
                 ChatMemberStatus.OWNER,

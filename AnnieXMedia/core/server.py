@@ -16,6 +16,7 @@ except Exception:
 _start_time = time.time()
 _server = None
 _WEB_DIR = Path(__file__).resolve().parent.parent / "assets" / "web"
+_ASSET_CACHE: Dict[str, bytes] = {}
 _MAX_BODY_BYTES = 65536
 
 _STATUS_MAP = {
@@ -33,13 +34,25 @@ _STATUS_MAP = {
 
 
 def _load_web_asset(filename: str) -> Optional[bytes]:
+    cached = _ASSET_CACHE.get(filename)
+    if cached is not None:
+        return cached
     asset = (_WEB_DIR / filename).resolve()
     if asset.parent != _WEB_DIR.resolve() or not asset.is_file():
         return None
     try:
-        return asset.read_bytes()
+        data = asset.read_bytes()
+        _ASSET_CACHE[filename] = data
+        return data
     except OSError:
         return None
+
+
+async def _load_web_asset_async(filename: str) -> Optional[bytes]:
+    cached = _ASSET_CACHE.get(filename)
+    if cached is not None:
+        return cached
+    return await asyncio.to_thread(_load_web_asset, filename)
 
 
 async def _read_http_request(
@@ -100,6 +113,7 @@ def _send_response_bytes(
         f"HTTP/1.1 {status_text}\r\n"
         f"Content-Type: {content_type}\r\n"
         "X-Content-Type-Options: nosniff\r\n"
+        "Referrer-Policy: no-referrer\r\n"
         "Cache-Control: no-store\r\n"
         "Connection: close\r\n"
         f"Content-Length: {len(body)}\r\n\r\n"
@@ -127,13 +141,13 @@ async def _handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWr
             body = f'{{"status":"ok","service":"AnnieXMusic","uptime":"{uptime}s"}}\n'.encode("utf-8")
             resp = _send_response_bytes(200, "application/json; charset=utf-8", body, method)
         elif path == "/app":
-            asset = _load_web_asset("app.html")
+            asset = await _load_web_asset_async("app.html")
             if asset is None:
                 resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Mini App not found", method)
             else:
                 resp = _send_response_bytes(200, "text/html; charset=utf-8", asset, method)
         elif path == "/game":
-            asset = _load_web_asset("game.html")
+            asset = await _load_web_asset_async("game.html")
             if asset is None:
                 resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Game not found", method)
             else:
@@ -175,7 +189,7 @@ async def _handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWr
             resp = _send_response_bytes(404, "text/plain; charset=utf-8", b"Not Found", method)
 
         writer.write(resp)
-        await writer.drain()
+        await asyncio.wait_for(writer.drain(), timeout=5.0)
     except Exception as e:
         log.debug(f"Web server request handling error: {e}")
     finally:

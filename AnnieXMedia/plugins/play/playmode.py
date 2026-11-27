@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import html
 from pyrogram import filters
 from pyrogram.types import InlineKeyboardMarkup, Message
 
@@ -30,8 +31,8 @@ async def playmode_(client, message: Message, _):
     else:
         Playtype = True
     buttons = playmode_users_markup(_, Direct, Group, Playtype)
-    title = message.chat.title or "Group"
-    response = await message.reply_text(
+    title = html.escape(message.chat.title or "Group")
+    await message.reply_text(
         _["play_22"].format(title),
         reply_markup=InlineKeyboardMarkup(buttons),
     )

@@ -1,7 +1,9 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 import random
 import time
+from urllib.parse import quote
 from pyrogram import filters
 from pyrogram.enums import ChatType
 from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, LinkPreviewOptions, Message
@@ -9,6 +11,7 @@ from youtubesearchpython.aio import VideosSearch
 
 import config
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.misc import _boot_
 from AnnieXMedia.plugins.sudo.sudoers import sudoers_list
 from AnnieXMedia.utils import bot_sys_stats
@@ -17,8 +20,8 @@ from AnnieXMedia.utils.database import (
     add_served_user,
     blacklisted_chats,
     get_lang,
-    get_served_chats,
-    get_served_users,
+    get_served_chats_count,
+    get_served_users_count,
     is_banned_user,
     is_on_off,
 )
@@ -99,7 +102,7 @@ async def start_pm(client, message: Message, _):
         if name.startswith("inf"):
             m = await message.reply_text("🔎")
             try:
-                vid_id = str(name).replace("info_", "", 1)
+                vid_id = quote(str(name).replace("info_", "", 1)[:64], safe="-_")
                 query = f"https://www.youtube.com/watch?v={vid_id}"
                 results = VideosSearch(query, limit=1)
                 data = await results.next()
@@ -108,14 +111,14 @@ async def start_pm(client, message: Message, _):
                     await m.edit_text("No results found.")
                     return
 
-                title = result.get("title") or "Unknown"
-                duration = result.get("duration") or "Unknown"
-                views = (result.get("viewCount") or {}).get("short") or "Unknown"
+                title = html.escape(str(result.get("title") or "Unknown"))
+                duration = html.escape(str(result.get("duration") or "Unknown"))
+                views = html.escape(str((result.get("viewCount") or {}).get("short") or "Unknown"))
                 thumbnail = ((result.get("thumbnails") or [{}])[0].get("url") or "").split("?")[0]
                 channellink = (result.get("channel") or {}).get("link") or "https://youtube.com"
-                channel = (result.get("channel") or {}).get("name") or "Unknown"
+                channel = html.escape(str((result.get("channel") or {}).get("name") or "Unknown"))
                 link = result.get("link") or query
-                published = result.get("publishedTime") or "Unknown"
+                published = html.escape(str(result.get("publishedTime") or "Unknown"))
 
                 searched_text = _["start_6"].format(title, duration, views, published, channellink, channel, app.mention)
                 key = InlineKeyboardMarkup(
@@ -132,13 +135,13 @@ async def start_pm(client, message: Message, _):
                     await app.send_photo(
                         chat_id=message.chat.id,
                         photo=thumbnail or HELP_IMG_URL,
-                        caption=searched_text,
+                        caption=searched_text[:1024],
                         reply_markup=key,
                     )
                 except Exception:
                     await app.send_message(
                         chat_id=message.chat.id,
-                        text=searched_text,
+                        text=searched_text[:4096],
                         reply_markup=key,
                         link_preview_options=LinkPreviewOptions(is_disabled=True),
                     )
@@ -157,7 +160,7 @@ async def start_pm(client, message: Message, _):
                     except Exception:
                         pass
             except Exception as e:
-                await m.edit_text(f"Error: {e}")
+                await m.edit_text(f"Error: {html.escape(str(e))}")
             return
 
     out = private_panel(_)
@@ -167,16 +170,13 @@ async def start_pm(client, message: Message, _):
     except Exception:
         pass
 
-    served_chats_coro = get_served_chats()
-    served_users_coro = get_served_users()
-    stats_coro = bot_sys_stats()
     served_chats, served_users, (UP, CPU, RAM, DISK) = await asyncio.gather(
-        served_chats_coro, served_users_coro, stats_coro
+        get_served_chats_count(), get_served_users_count(), bot_sys_stats()
     )
 
     user_mention = message.from_user.mention if message.from_user else "User"
     caption_text = random.choice(AYUV).format(
-        user_mention, app.mention, UP, DISK, CPU, RAM, len(served_users), len(served_chats)
+        user_mention, app.mention, UP, DISK, CPU, RAM, served_users, served_chats
     )
 
     try:
@@ -249,7 +249,7 @@ async def welcome(client, message: Message):
                     pass
 
             if member.id == app.id:
-                if message.chat.type != ChatType.SUPERGROUP:
+                if message.chat.type not in (ChatType.SUPERGROUP, ChatType.FORUM):
                     await message.reply_text(_["start_4"])
                     return await app.leave_chat(message.chat.id)
 
@@ -269,19 +269,19 @@ async def welcome(client, message: Message):
                 welcome_caption = _["start_3"].format(
                     user_mention,
                     app.mention,
-                    message.chat.title,
+                    html.escape(message.chat.title or "Group"),
                     app.mention,
                 )
                 try:
                     await message.reply_video(
                         random.choice(START_VIDS),
-                        caption=welcome_caption,
+                        caption=welcome_caption[:1024],
                         reply_markup=InlineKeyboardMarkup(out),
                     )
                 except Exception:
                     try:
                         await message.reply_text(
-                            welcome_caption,
+                            welcome_caption[:4096],
                             reply_markup=InlineKeyboardMarkup(out),
                         )
                     except Exception:
@@ -290,4 +290,4 @@ async def welcome(client, message: Message):
                 await message.stop_propagation()
 
         except Exception as ex:
-            print(ex)
+            LOGGER(__name__).debug(f"welcome error: {ex}")

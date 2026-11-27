@@ -1,10 +1,11 @@
 # Authored By Certified Coders © 2025
 from datetime import datetime
-import httpx
+import aiohttp
 from pyrogram import Client, filters, enums
 from pyrogram.types import Message
 from config import BOT_USERNAME
 from AnnieXMedia import app
+from AnnieXMedia.core.http_pool import get_http_session
 
 
 @app.on_message(filters.command("write"))
@@ -19,13 +20,18 @@ async def handwrite(_, message: Message):
             parse_mode=enums.ParseMode.MARKDOWN
         )
 
+    text = text[:500]
     msg = await message.reply_text("✍️ Please wait...\nWriting your text...")
 
     try:
-        async with httpx.AsyncClient(timeout=15.0) as client:
-            response = await client.get("https://apis.xditya.me/write", params={"text": text})
-            if response.status_code != 200:
-                raise Exception(f"API Error {response.status_code}")
+        client = await get_http_session()
+        async with client.get(
+            "https://apis.xditya.me/write",
+            params={"text": text},
+            timeout=aiohttp.ClientTimeout(total=15),
+        ) as response:
+            if response.status != 200:
+                raise Exception(f"API Error {response.status}")
             image_url = str(response.url)
     except Exception:
         return await msg.edit(
