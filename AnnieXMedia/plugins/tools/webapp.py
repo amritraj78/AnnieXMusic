@@ -15,6 +15,7 @@ from pyrogram.types import (
 
 import config
 from AnnieXMedia import app
+from AnnieXMedia.core.webapp_api import GAME_LABELS
 from AnnieXMedia.core.webapp_auth import set_webapp_menu_button, sign_game_launch
 from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.misc import SUDOERS
@@ -30,6 +31,15 @@ _GAME_KEY_ALIASES = {
     "flappy": "flappy",
     "beats": "beats",
     "tiles": "beats",
+    "breaker": "breaker",
+    "brick": "breaker",
+    "bricks": "breaker",
+    "breakout": "breaker",
+    "2048": "g2048",
+    "g2048": "g2048",
+    "memory": "memory",
+    "simon": "memory",
+    "mem": "memory",
 }
 
 
@@ -47,13 +57,20 @@ def build_private_webapp_markup() -> InlineKeyboardMarkup:
 
 
 def build_private_arcade_markup() -> InlineKeyboardMarkup:
-    """Return private-chat WebApp buttons for all 3 Neon Arcade games."""
+    """Return private-chat WebApp buttons for all 6 Neon Arcade games."""
     return InlineKeyboardMarkup(
         [
-            [InlineKeyboardButton("🎹 Play Beat Tiles", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=beats"))],
             [
+                InlineKeyboardButton("🎹 Beat Tiles", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=beats")),
                 InlineKeyboardButton("🐍 Neon Snake", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=snake")),
+            ],
+            [
                 InlineKeyboardButton("⚡ Flappy Beat", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=flappy")),
+                InlineKeyboardButton("🧱 Brick Breaker", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=breaker")),
+            ],
+            [
+                InlineKeyboardButton("🔢 2048 Neon", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=g2048")),
+                InlineKeyboardButton("🧠 Memory Beat", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game=memory")),
             ],
             [InlineKeyboardButton("🎵 Back to Music Mini App", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/app"))],
         ]
@@ -68,7 +85,7 @@ async def cmd_app(_, message: Message):
             "🎵 **AnnieXMusic Mini App**\n\n"
             "• Live Voice Chat Player & Queue Controls\n"
             "• Instant Song Search & Queue into Group VC\n"
-            "• Built-in 3-in-1 Neon Arcade & Leaderboards",
+            "• Built-in 6-in-1 Velvet Aurora Arcade & Leaderboards",
             reply_markup=build_private_webapp_markup(),
         )
 
@@ -97,20 +114,27 @@ async def cmd_game(_, message: Message):
 
     if message.chat.type == ChatType.PRIVATE:
         if target_game:
+            game_label = GAME_LABELS.get(target_game, target_game.title())
             return await message.reply_text(
-                f"🕹️ **Launching {target_game.title()}**",
+                f"🕹️ **Launching {game_label}**",
                 reply_markup=InlineKeyboardMarkup(
                     [[InlineKeyboardButton("▶ Play Now", web_app=WebAppInfo(url=f"{_WEBAPP_URL}/game?game={target_game}"))]]
                 ),
             )
         return await message.reply_text(
-            "🕹️ **Neon Arcade**\n\nBeat Tiles · Neon Snake · Flappy Beat\nCompete for #1 on the live leaderboard!",
+            "🕹️ **Neon Arcade (6 Games)**\n\n"
+            "Beat Tiles · Neon Snake · Flappy Beat\n"
+            "Brick Breaker · 2048 Neon · Memory Beat\n"
+            "Compete for #1 on the live leaderboard!",
             reply_markup=build_private_arcade_markup(),
         )
 
     bot_user = getattr(app, "username", None) or config.BOT_USERNAME
     return await message.reply_text(
-        "🕹️ **Neon Arcade**\n\nBeat Tiles · Neon Snake · Flappy Beat\nTap below to play!",
+        "🕹️ **Neon Arcade (6 Games)**\n\n"
+        "Beat Tiles · Neon Snake · Flappy Beat\n"
+        "Brick Breaker · 2048 Neon · Memory Beat\n"
+        "Tap below to play!",
         reply_markup=InlineKeyboardMarkup(
             [[InlineKeyboardButton("🎮 Open Neon Arcade", url=f"https://t.me/{bot_user}?start=game")]]
         ),

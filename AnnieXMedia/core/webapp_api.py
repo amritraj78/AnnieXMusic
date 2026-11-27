@@ -67,6 +67,9 @@ GAME_LABELS: Dict[str, str] = {
     "beats": "Beat Tiles",
     "snake": "Neon Snake",
     "flappy": "Flappy Beat",
+    "breaker": "Brick Breaker",
+    "g2048": "2048 Neon",
+    "memory": "Memory Beat",
 }
 game_scoresdb = mongodb.game_scores
 _bot_ready = lambda: bool(getattr(app, "id", 0))
