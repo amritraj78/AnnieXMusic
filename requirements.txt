@@ -21,6 +21,7 @@ pytgcrypto
 pyyaml
 qrcode
 requests
+six
 speedtest-cli
 spotipy
 unidecode
