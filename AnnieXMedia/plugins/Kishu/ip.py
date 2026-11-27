@@ -149,13 +149,14 @@ async def ip_info_and_score(_, message):
     # Validate IP
     try:
         ip_obj = ipaddress.ip_address(ip_raw)
-        if ip_obj.is_private or ip_obj.is_loopback or ip_obj.is_reserved or ip_obj.is_multicast:
+        if not ip_obj.is_global:
             await message.reply_text(
                 "That looks like a <b>non-routable</b> or <b>private</b> address. "
                 "Please provide a public IP.",
                 link_preview_options=LinkPreviewOptions(is_disabled=True),
             )
             return
+        ip_norm = ip_obj.compressed
     except ValueError:
         await message.reply_text(
             "Invalid IP format. Please provide a valid IPv4 or IPv6 address.\n"
@@ -168,8 +169,8 @@ async def ip_info_and_score(_, message):
 
     session = await get_http_session()
     ipinfo, score = await asyncio.gather(
-        fetch_ipinfo(session, ip_raw),
-        fetch_ipqs(session, ip_raw),
+        fetch_ipinfo(session, ip_norm),
+        fetch_ipqs(session, ip_norm),
     )
 
     if not ipinfo and score is None:
@@ -178,7 +179,7 @@ async def ip_info_and_score(_, message):
         )
         return
 
-    text, keyboard = _build_card(ip_raw, ipinfo or {}, score)
+    text, keyboard = _build_card(ip_norm, ipinfo or {}, score)
     await wait_msg.edit_text(
         text,
         reply_markup=keyboard,

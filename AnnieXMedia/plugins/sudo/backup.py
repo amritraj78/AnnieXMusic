@@ -47,20 +47,31 @@ def _build_zip_archive(zip_path: str, source_dir: str):
                 zf.write(fp, arc)
 
 
+def _prepare_backup_dir() -> None:
+    os.makedirs(BACKUP_DIR, exist_ok=True)
+    for fname in os.listdir(BACKUP_DIR):
+        fpath = os.path.join(BACKUP_DIR, fname)
+        if os.path.isfile(fpath) and fname.endswith(".zip"):
+            try:
+                os.remove(fpath)
+            except Exception:
+                pass
+
+
+def _remove_file(path: str | None) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except Exception:
+            pass
+
+
 async def _create_backup_zip() -> str:
     async with _backup_lock:
         LOGGER(__name__).info("🗂️ Starting backup process for all collections…")
-        os.makedirs(BACKUP_DIR, exist_ok=True)
+        await asyncio.to_thread(_prepare_backup_dir)
 
         collections = await mongodb.list_collection_names()
-
-        for fname in os.listdir(BACKUP_DIR):
-            fpath = os.path.join(BACKUP_DIR, fname)
-            if os.path.isfile(fpath) and fname.endswith(".zip"):
-                try:
-                    os.remove(fpath)
-                except Exception:
-                    pass
 
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         zip_name = f"AnnieXMedia_Backup_{timestamp}.zip"
@@ -83,11 +94,7 @@ async def _send_backup(zip_path: str, chat_id: int, caption: str):
     try:
         await app.send_document(chat_id=chat_id, document=zip_path, caption=caption)
     finally:
-        if zip_path and os.path.exists(zip_path):
-            try:
-                os.remove(zip_path)
-            except Exception:
-                pass
+        await asyncio.to_thread(_remove_file, zip_path)
 
 
 @app.on_message(filters.command("backup") & filters.user(OWNER_ID))

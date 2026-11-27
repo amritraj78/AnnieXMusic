@@ -261,4 +261,4 @@ async def kang(client, message):
         LOGGER(__name__).exception("Kang failed")
         await notify.edit(f"unexpected error: {err}")
     finally:
-        shutil.rmtree(tmp_dir, ignore_errors=True)
+        await asyncio.to_thread(shutil.rmtree, tmp_dir, True)

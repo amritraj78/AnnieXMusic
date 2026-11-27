@@ -36,13 +36,32 @@ from AnnieXMedia.utils.database import (
 )
 from AnnieXMedia.utils.formatters import int_to_alpha, seconds_to_min
 from AnnieXMedia.utils.inline import aq_markup, stream_markup
-from AnnieXMedia.utils.security import is_safe_http_url
+from AnnieXMedia.utils.security import is_safe_http_url, redact_secrets
 from AnnieXMedia.utils.stream.queue import put_queue
 from AnnieXMedia.utils.thumbnails import get_thumb
 from config import BANNED_USERS, time_to_seconds
 from strings import get_string
 
 _YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
+_RATE_BUCKETS: Dict[Tuple[int, str], List[float]] = {}
+
+
+def _check_rate_limit(uid: int, bucket: str, limit: int, window_sec: float = 60.0) -> bool:
+    """Return True if the request is within the per-user sliding window quota."""
+    now = time.monotonic()
+    key = (int(uid), bucket)
+    if len(_RATE_BUCKETS) > 2048:
+        cutoff = now - 120.0
+        for k in list(_RATE_BUCKETS.keys()):
+            if not _RATE_BUCKETS[k] or _RATE_BUCKETS[k][-1] < cutoff:
+                _RATE_BUCKETS.pop(k, None)
+    hits = [ts for ts in _RATE_BUCKETS.get(key, ()) if (now - ts) < window_sec]
+    if len(hits) >= limit:
+        _RATE_BUCKETS[key] = hits
+        return False
+    hits.append(now)
+    _RATE_BUCKETS[key] = hits
+    return True
 
 GAME_LABELS: Dict[str, str] = {
     "beats": "Beat Tiles",
@@ -105,6 +124,7 @@ async def get_leaderboard_data(
     game: str = "beats", limit: int = 15, user_id: Optional[int] = None
 ) -> Dict[str, Any]:
     g = game if game in GAME_LABELS else "beats"
+    limit = max(1, min(int(limit), 50))
     top_rows: List[Dict[str, Any]] = []
     cursor = game_scoresdb.find({"game": g}).sort([("score", -1), ("updated_at", 1)]).limit(limit)
     idx = 0
@@ -220,8 +240,12 @@ async def _handle_overview(headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]
 
 
 async def _handle_search(query_str: str, headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]]:
-    if not _auth_user(headers):
+    auth = _auth_user(headers)
+    if not auth:
         return 401, {"error": "Open this Mini App inside Telegram to search and queue tracks."}
+    uid = int(auth["user"]["id"])
+    if not _check_rate_limit(uid, "search", 20, 60.0):
+        return 429, {"error": "Too many search requests. Please wait a moment."}
 
     params = parse_qs(query_str)
     q = (params.get("q") or [""])[0].strip()
@@ -232,7 +256,7 @@ async def _handle_search(query_str: str, headers: Dict[str, str]) -> Tuple[int, 
         res = await VideosSearch(q, limit=6).next()
         raw_items = res.get("result") or []
     except Exception as exc:
-        return 502, {"error": f"Search error: {exc}"}
+        return 502, {"error": f"Search error: {redact_secrets(str(exc))[:200]}"}
 
     tracks = []
     for item in raw_items:
@@ -281,6 +305,8 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
 
     if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
         return 403, {"error": "You are banned from using this bot."}
+    if not _check_rate_limit(uid, "play", 8, 60.0):
+        return 429, {"error": "Too many play requests. Please slow down."}
     if await is_maintenance() is False and uid != config.OWNER_ID and uid not in SUDOERS:
         return 503, {"error": "Bot is currently in maintenance mode."}
 
@@ -331,7 +357,7 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
             vidid, None, video=is_video, videoid=vidid, title=title
         )
     except Exception as exc:
-        return 502, {"error": f"Download error: {exc}"}
+        return 502, {"error": f"Download error: {redact_secrets(str(exc))[:200]}"}
 
     if not file_path:
         return 502, {"error": "Failed to fetch track audio/video."}
@@ -384,8 +410,9 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
         )
         try:
             img = await get_thumb(vidid)
+            bot_user = getattr(app, "username", None) or config.BOT_USERNAME
             cap = _["stream_1"].format(
-                f"https://t.me/{app.username}?start=info_{vidid}",
+                f"https://t.me/{bot_user}?start=info_{vidid}",
                 safe_title[:23],
                 safe_dur,
                 user_mention,
@@ -403,7 +430,7 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
             pass
         return 200, {"ok": True, "status": "playing", "title": title}
     except Exception as exc:
-        return 400, {"error": str(exc)}
+        return 400, {"error": redact_secrets(str(exc))[:240]}
 
 
 async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
@@ -413,6 +440,8 @@ async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tupl
     uid = int(auth["user"]["id"])
     if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
         return 403, {"error": "You are banned from using this bot."}
+    if not _check_rate_limit(uid, "control", 30, 60.0):
+        return 429, {"error": "Too many control requests. Please slow down."}
     if await is_maintenance() is False and uid != config.OWNER_ID and uid not in SUDOERS:
         return 503, {"error": "Bot is currently in maintenance mode."}
 
@@ -463,7 +492,7 @@ async def _handle_control(headers: Dict[str, str], body: Dict[str, Any]) -> Tupl
 
         return 400, {"error": "Unsupported action."}
     except Exception as exc:
-        return 500, {"error": str(exc)}
+        return 500, {"error": redact_secrets(str(exc))[:240]}
 
 
 async def _handle_game_score(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
@@ -493,6 +522,9 @@ async def _handle_game_score(headers: Dict[str, str], body: Dict[str, Any]) -> T
         uname = str(launch_payload.get("username") or "")
     else:
         return 401, {"error": "Open inside Telegram to save leaderboard scores."}
+
+    if not _check_rate_limit(uid, "score", 20, 60.0):
+        return 429, {"error": "Too many score submissions. Please wait a moment."}
 
     now = int(time.time())
     await game_scoresdb.update_one(

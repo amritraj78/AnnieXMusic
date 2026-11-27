@@ -27,6 +27,7 @@ _STATUS_MAP = {
     404: "404 Not Found",
     405: "405 Method Not Allowed",
     413: "413 Payload Too Large",
+    429: "429 Too Many Requests",
     500: "500 Internal Server Error",
     502: "502 Bad Gateway",
     503: "503 Service Unavailable",
@@ -105,15 +106,29 @@ async def _read_http_request(
     return method, path, query_str, headers, body
 
 
+_HTML_CSP = (
+    "default-src 'self' https:; "
+    "script-src 'self' 'unsafe-inline' https://telegram.org; "
+    "style-src 'self' 'unsafe-inline'; "
+    "img-src 'self' https: data:; "
+    "connect-src 'self'; "
+    "object-src 'none'; "
+    "base-uri 'self'"
+)
+
+
 def _send_response_bytes(
     status_code: int, content_type: str, body: bytes, method: str = "GET"
 ) -> bytes:
     status_text = _STATUS_MAP.get(status_code, f"{status_code} OK")
+    csp = _HTML_CSP if "text/html" in content_type else "default-src 'none'"
     headers = (
         f"HTTP/1.1 {status_text}\r\n"
         f"Content-Type: {content_type}\r\n"
         "X-Content-Type-Options: nosniff\r\n"
         "Referrer-Policy: no-referrer\r\n"
+        "Permissions-Policy: camera=(), microphone=(), geolocation=()\r\n"
+        f"Content-Security-Policy: {csp}\r\n"
         "Cache-Control: no-store\r\n"
         "Connection: close\r\n"
         f"Content-Length: {len(body)}\r\n\r\n"

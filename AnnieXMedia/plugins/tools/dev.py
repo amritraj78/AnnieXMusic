@@ -13,8 +13,25 @@ from pyrogram.types import InlineKeyboardButton, InlineKeyboardMarkup, Message
 
 from config import OWNER_ID
 from AnnieXMedia import app
+from AnnieXMedia.core.security import redact_secrets
 
 _eval_lock = asyncio.Lock()
+
+
+def _write_text_file(path: str, text: str) -> None:
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as out_file:
+        out_file.write(text)
+
+
+def _remove_file_if_exists(path: str | None) -> None:
+    if path and os.path.exists(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 async def aexec(code, client, message):
@@ -80,6 +97,7 @@ async def executor(client: Client, message: Message):
     else:
         evaluation += "Success"
 
+    evaluation = redact_secrets(evaluation)
     final_output = f"<b>⥤ ʀᴇsᴜʟᴛ :</b>\n<pre language='python'>{html.escape(evaluation)}</pre>"
 
     t2 = time()
@@ -100,15 +118,14 @@ async def executor(client: Client, message: Message):
     )
 
     if len(final_output) > 4096:
-        filename = f"output_{message.chat.id}_{message.id}.txt"
+        filename = f"cache/output_{message.chat.id}_{message.id}.txt"
         try:
-            with open(filename, "w+", encoding="utf8") as out_file:
-                out_file.write(str(evaluation))
-
+            await asyncio.to_thread(_write_text_file, filename, str(evaluation))
+            safe_cmd = html.escape(redact_secrets(cmd[:980]))
             await client.send_document(
                 chat_id=message.chat.id,
                 document=filename,
-                caption=f"<b>⥤ ᴇᴠᴀʟ :</b>\n<code>{html.escape(cmd[:980])}</code>\n\n<b>⥤ ʀᴇsᴜʟᴛ :</b>\nAttached Document",
+                caption=f"<b>⥤ ᴇᴠᴀʟ :</b>\n<code>{safe_cmd}</code>\n\n<b>⥤ ʀᴇsᴜʟᴛ :</b>\nAttached Document",
                 reply_markup=keyboard,
             )
             try:
@@ -116,11 +133,7 @@ async def executor(client: Client, message: Message):
             except Exception:
                 pass
         finally:
-            if os.path.exists(filename):
-                try:
-                    os.remove(filename)
-                except OSError:
-                    pass
+            await asyncio.to_thread(_remove_file_if_exists, filename)
     else:
         await edit_or_reply(message, text=final_output, reply_markup=keyboard)
 
@@ -195,18 +208,15 @@ async def shellrunner(_, message: Message):
     except Exception as err:
         return await edit_or_reply(message, text=f"<b>ERROR :</b>\n<pre>{html.escape(str(err))}</pre>")
 
+    output = redact_secrets(output)
     if not output.strip():
         output = "None"
 
     formatted = f"<b>OUTPUT :</b>\n<pre>{html.escape(output)}</pre>"
     if len(formatted) > 4096:
-        out_path = f"sh_output_{message.chat.id}_{message.id}.txt"
+        out_path = f"cache/sh_output_{message.chat.id}_{message.id}.txt"
         try:
-            def _write_out():
-                with open(out_path, "w", encoding="utf-8") as file:
-                    file.write(output)
-
-            await asyncio.to_thread(_write_out)
+            await asyncio.to_thread(_write_text_file, out_path, output)
             await app.send_document(
                 message.chat.id,
                 out_path,
@@ -214,11 +224,7 @@ async def shellrunner(_, message: Message):
                 caption="<code>Output</code>",
             )
         finally:
-            if os.path.exists(out_path):
-                try:
-                    await asyncio.to_thread(os.remove, out_path)
-                except OSError:
-                    pass
+            await asyncio.to_thread(_remove_file_if_exists, out_path)
     else:
         await edit_or_reply(message, text=formatted)
 

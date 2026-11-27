@@ -153,10 +153,12 @@ async def get_thumb(videoid: str) -> str:
     except Exception:
         return YOUTUBE_IMG_URL
     finally:
-        try:
-            if os.path.exists(thumb_path):
-                os.remove(thumb_path)
-        except OSError:
-            pass
+        def _rm_thumb():
+            try:
+                if os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+            except OSError:
+                pass
+        await asyncio.to_thread(_rm_thumb)
 
     return cache_path if os.path.exists(cache_path) else YOUTUBE_IMG_URL

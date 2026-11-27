@@ -4,7 +4,9 @@ from pyrogram.types import Message
 from pyrogram.enums import ParseMode
 from nekosbest import Client as NekoClient
 from AnnieXMedia import app
+from AnnieXMedia.logging import LOGGER
 
+_LOGGER = LOGGER(__name__)
 neko_client = NekoClient()
 
 commands = {
@@ -53,7 +55,7 @@ async def get_animation(action: str):
         result = await neko_client.get_image(action)
         return result.url
     except Exception as e:
-        print(f"❌ NekoClient error: {e}")
+        _LOGGER.warning("NekoClient error: %s", e)
         return None
 
 
@@ -80,7 +82,7 @@ async def animation_command(client: Client, message: Message):
     action_text = commands[command]['text']
     emoji = commands[command]['emoji']
 
-    caption = f"**{sender} {action_text} {target}!** {emoji}"
+    caption = f"**{sender} {action_text} {target}!** {emoji}"[:1024]
 
     try:
         await message.reply_animation(

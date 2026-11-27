@@ -1,7 +1,16 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import os
 
 from config import autoclean
+
+
+def _remove_if_file(path: str) -> None:
+    if os.path.isfile(path):
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 async def _clean_entry(entry: dict):
@@ -12,11 +21,8 @@ async def _clean_entry(entry: dict):
         autoclean.remove(rem)
     count = autoclean.count(rem)
     if count == 0:
-        if not any(k in str(rem) for k in ("vid_", "live_", "index_")) and os.path.isfile(rem):
-            try:
-                os.remove(rem)
-            except OSError:
-                pass
+        if not any(k in str(rem) for k in ("vid_", "live_", "index_")):
+            await asyncio.to_thread(_remove_if_file, rem)
 
 
 async def auto_clean(popped):

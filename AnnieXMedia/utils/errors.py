@@ -1,4 +1,5 @@
 # Authored By Certified Coders © 2025
+import asyncio
 import html
 import sys
 import traceback
@@ -32,19 +33,23 @@ async def send_large_error(text: str, caption: str, filename: str):
     except Exception:
         pass
 
-    path = f"{filename}.txt"
+    safe_name = os.path.basename(filename or "error_log")
+    path = os.path.join("cache", f"{safe_name}.txt")
     try:
+        await asyncio.to_thread(os.makedirs, "cache", exist_ok=True)
         async with aiofiles.open(path, "w", encoding="utf-8") as f:
             await f.write(clean_text)
         await app.send_document(LOGGER_ID, path, caption="❌ Error Log (Fallback)")
     except Exception:
         pass
     finally:
-        if os.path.exists(path):
-            try:
-                os.remove(path)
-            except OSError:
-                pass
+        def _rm():
+            if os.path.exists(path):
+                try:
+                    os.remove(path)
+                except OSError:
+                    pass
+        await asyncio.to_thread(_rm)
 
 
 # ========== Formatting & Routing ==========
