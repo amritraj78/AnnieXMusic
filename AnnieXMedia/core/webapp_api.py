@@ -53,13 +53,13 @@ _YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 _LRC_LINE_RE = re.compile(r"^\[(\d{1,2}):(\d{2})(?:\.(\d{1,3}))?\]\s*(.*)$")
 _LYRICS_CACHE: Dict[str, Tuple[float, Dict[str, Any]]] = {}
 playlistsdb = mongodb.user_playlists
-_RATE_BUCKETS: Dict[Tuple[int, str], List[float]] = {}
+_RATE_BUCKETS: Dict[Tuple[Any, str], List[float]] = {}
 
 
-def _check_rate_limit(uid: int, bucket: str, limit: int, window_sec: float = 60.0) -> bool:
-    """Return True if the request is within the per-user sliding window quota."""
+def _check_rate_limit(subject: Any, bucket: str, limit: int, window_sec: float = 60.0) -> bool:
+    """Return True if the request is within the per-subject sliding window quota."""
     now = time.monotonic()
-    key = (int(uid), bucket)
+    key = (str(subject), bucket)
     if len(_RATE_BUCKETS) > 2048:
         cutoff = now - 120.0
         for k in list(_RATE_BUCKETS.keys()):
@@ -170,13 +170,14 @@ async def get_leaderboard_data(
 
 
 def _serialize_track(item: Dict[str, Any]) -> Dict[str, Any]:
+    raw_by = html.unescape(re.sub(r"<[^>]+>", "", str(item.get("by") or "User"))).strip()
     return {
         "title": str(item.get("title") or "Unknown"),
         "duration": str(item.get("dur") or "0:00"),
         "played": seconds_to_min(int(item.get("played") or 0)),
         "played_sec": int(item.get("played") or 0),
         "total_sec": max(int(item.get("seconds") or 0), 0),
-        "by": str(item.get("by") or "User"),
+        "by": raw_by or "User",
         "vidid": str(item.get("vidid") or ""),
         "streamtype": str(item.get("streamtype") or "audio"),
     }
@@ -318,44 +319,79 @@ async def _parse_target_chat(raw_target: Any) -> Optional[int]:
     return None
 
 
-async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+async def _verify_play_access(
+    headers: Dict[str, str], raw_target_chat: Any
+) -> Tuple[Optional[Tuple[Dict[str, Any], int, int]], Optional[Tuple[int, Dict[str, Any]]]]:
+    """Validate auth, ban/maintenance state, rate quota, target group, and play permissions."""
     auth = _auth_user(headers)
     if not auth:
-        return 401, {"error": "Telegram authentication required."}
+        return None, (401, {"error": "Telegram authentication required."})
     user = auth["user"]
     uid = int(user["id"])
 
     if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
-        return 403, {"error": "You are banned from using this bot."}
+        return None, (403, {"error": "You are banned from using this bot."})
     if not _check_rate_limit(uid, "play", 8, 60.0):
-        return 429, {"error": "Too many play requests. Please slow down."}
+        return None, (429, {"error": "Too many play requests. Please slow down."})
     if await is_maintenance() is False and uid != config.OWNER_ID and uid not in SUDOERS:
-        return 503, {"error": "Bot is currently in maintenance mode."}
+        return None, (503, {"error": "Bot is currently in maintenance mode."})
 
-    chat_id = await _parse_target_chat(body.get("chat_id"))
+    chat_id = await _parse_target_chat(raw_target_chat)
+    if not chat_id or chat_id >= 0:
+        return None, (400, {"error": "Valid group chat ID (-100...) is required."})
+
+    is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
+    if not is_member:
+        return None, (403, {"error": "You must be a member of that group to queue music."})
+    if await get_playtype(chat_id) != "Everyone" and not can_ctrl:
+        return None, (403, {"error": "Only admins can play music in this group."})
+
+    return (user, uid, chat_id), None
+
+
+async def _send_now_playing_card(
+    chat_id: int, vidid: str, safe_title: str, safe_dur: str, user_mention: str, _lang
+) -> None:
+    """Post the Now Playing stream photo card and attach its reference for live updates."""
+    try:
+        img = await get_thumb(vidid)
+        bot_user = getattr(app, "username", None) or config.BOT_USERNAME
+        cap = _lang["stream_1"].format(
+            f"https://t.me/{bot_user}?start=info_{vidid}",
+            safe_title[:23],
+            safe_dur,
+            user_mention,
+        )
+        run = await app.send_photo(
+            chat_id,
+            photo=img,
+            caption=cap,
+            reply_markup=InlineKeyboardMarkup(stream_markup(_lang, chat_id)),
+        )
+        if chat_id in db and db[chat_id]:
+            db[chat_id][0]["mystic"] = run
+            db[chat_id][0]["markup"] = "stream"
+    except Exception:
+        pass
+
+
+async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
+    ctx, err_resp = await _verify_play_access(headers, body.get("chat_id"))
+    if err_resp:
+        return err_resp
+    user, uid, chat_id = ctx
+
     query = str(body.get("query") or "").strip()
     is_video = bool(body.get("video", False))
     hint_vidid = str(body.get("vidid") or "").strip()
     hint_title = str(body.get("title") or "").strip()
-    hint_dur = str(body.get("duration") or "").strip()
-    hint_thumb = str(body.get("thumb") or "").strip()
 
-    if not chat_id or chat_id >= 0:
-        return 400, {"error": "Valid group chat ID (-100...) is required."}
     if not query or len(query) > 200:
         return 400, {"error": "Provide a song name or YouTube URL."}
 
     if "://" in query:
         if not await YouTube.exists(query) or not await is_safe_http_url(query):
             return 400, {"error": "Only public YouTube URLs or song names are supported."}
-
-    is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
-    if not is_member:
-        return 403, {"error": "You must be a member of that group to queue music."}
-
-    playtype = await get_playtype(chat_id)
-    if playtype != "Everyone" and not can_ctrl:
-        return 403, {"error": "Only admins can play music in this group."}
 
     resolve_target = hint_vidid if _YOUTUBE_ID_RE.match(hint_vidid) else query
     try:
@@ -430,26 +466,7 @@ async def _handle_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[i
             uid,
             stream_label,
         )
-        try:
-            img = await get_thumb(vidid)
-            bot_user = getattr(app, "username", None) or config.BOT_USERNAME
-            cap = _["stream_1"].format(
-                f"https://t.me/{bot_user}?start=info_{vidid}",
-                safe_title[:23],
-                safe_dur,
-                user_mention,
-            )
-            run = await app.send_photo(
-                chat_id,
-                photo=img,
-                caption=cap,
-                reply_markup=InlineKeyboardMarkup(stream_markup(_, chat_id)),
-            )
-            if chat_id in db and db[chat_id]:
-                db[chat_id][0]["mystic"] = run
-                db[chat_id][0]["markup"] = "stream"
-        except Exception:
-            pass
+        await _send_now_playing_card(chat_id, vidid, safe_title, safe_dur, user_mention, _)
         return 200, {"ok": True, "status": "playing", "title": title}
     except Exception as exc:
         return 400, {"error": redact_secrets(str(exc))[:240]}
@@ -641,8 +658,8 @@ async def _handle_game_score(headers: Dict[str, str], body: Dict[str, Any]) -> T
 
 async def _handle_lyrics(query_str: str, headers: Dict[str, str]) -> Tuple[int, Dict[str, Any]]:
     auth = _auth_user(headers)
-    rl_uid = int(auth["user"]["id"]) if auth else 0
-    if not _check_rate_limit(rl_uid, "lyrics", 30, 60.0):
+    rl_subj = int(auth["user"]["id"]) if auth else (headers.get("x-client-ip") or "guest")
+    if not _check_rate_limit(rl_subj, "lyrics", 30, 60.0):
         return 429, {"error": "Too many lyrics requests. Wait a moment."}
 
     params = parse_qs(query_str)
@@ -788,24 +805,10 @@ async def _handle_playlist_delete(headers: Dict[str, str], body: Dict[str, Any])
 
 
 async def _handle_playlist_play(headers: Dict[str, str], body: Dict[str, Any]) -> Tuple[int, Dict[str, Any]]:
-    auth = _auth_user(headers)
-    if not auth:
-        return 401, {"error": "Telegram authentication required."}
-    user = auth["user"]
-    uid = int(user["id"])
-    if uid in BANNED_USERS or await is_banned_user(uid) or await is_gbanned_user(uid):
-        return 403, {"error": "You are banned from using this bot."}
-    if not _check_rate_limit(uid, "play", 8, 60.0):
-        return 429, {"error": "Too many play requests. Please slow down."}
-
-    chat_id = await _parse_target_chat(body.get("chat_id"))
-    if not chat_id or chat_id >= 0:
-        return 400, {"error": "Valid group chat ID (-100...) is required."}
-    is_member, can_ctrl, _ = await _is_chat_admin(chat_id, uid)
-    if not is_member:
-        return 403, {"error": "You must be a member of that group to queue music."}
-    if await get_playtype(chat_id) != "Everyone" and not can_ctrl:
-        return 403, {"error": "Only admins can play music in this group."}
+    ctx, err_resp = await _verify_play_access(headers, body.get("chat_id"))
+    if err_resp:
+        return err_resp
+    user, uid, chat_id = ctx
 
     doc = await playlistsdb.find_one({"user_id": uid})
     saved_tracks = list((doc or {}).get("tracks") or [])[:10]
@@ -814,6 +817,7 @@ async def _handle_playlist_play(headers: Dict[str, str], body: Dict[str, Any]) -
 
     user_name = html.escape(_display_name(user))
     user_mention = f"<a href='tg://user?id={uid}'>{user_name}</a>"
+    _ = get_string(await get_lang(chat_id))
     queued_count = 0
 
     for item in saved_tracks:
@@ -841,6 +845,9 @@ async def _handle_playlist_play(headers: Dict[str, str], body: Dict[str, Any]) -
                 vid,
                 uid,
                 "audio",
+            )
+            await _send_now_playing_card(
+                chat_id, vid, html.escape(t_title), html.escape(t_dur), user_mention, _
             )
             queued_count += 1
 

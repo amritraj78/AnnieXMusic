@@ -782,20 +782,32 @@ async def run_sync_with_semaphore(func, *args):
 
 
 async def deduplicate_download(key: str, runner):
+    existing_fut: Optional[asyncio.Future] = None
     async with _inflight_lock:
-        if fut := _inflight.get(key):
-            try:
-                return await fut
-            except BaseException:
-                return None
-        fut = asyncio.get_running_loop().create_future()
-        _inflight[key] = fut
+        if key in _inflight:
+            existing_fut = _inflight[key]
+        else:
+            fut = asyncio.get_running_loop().create_future()
+            _inflight[key] = fut
+
+    if existing_fut is not None:
+        try:
+            return await existing_fut
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
+
     try:
         result = await runner()
         if not fut.done():
             fut.set_result(result)
         return result
-    except BaseException:
+    except asyncio.CancelledError:
+        if not fut.done():
+            fut.set_result(None)
+        raise
+    except Exception:
         if not fut.done():
             fut.set_result(None)
         return None

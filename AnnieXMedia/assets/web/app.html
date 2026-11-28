@@ -643,9 +643,11 @@ async function runSearch() {
       out.innerHTML = '<div class="empty">No results found.</div>';
       return;
     }
-    out.innerHTML = state.searchTracks.map((tr, idx) => `
+    out.innerHTML = state.searchTracks.map((tr, idx) => {
+      const safeImg = /^https:\/\//i.test(tr.thumb || "") ? tr.thumb : "https://files.catbox.moe/veykzq.jpg";
+      return `
       <div class="res-card">
-        <img src="${esc(tr.thumb || 'https://files.catbox.moe/veykzq.jpg')}" loading="lazy">
+        <img src="${esc(safeImg)}" loading="lazy">
         <div class="res-meta">
           <div class="res-title">${esc(tr.title)}</div>
           <div class="res-info">${esc(tr.duration)} • ${esc(tr.channel)}</div>
@@ -655,8 +657,8 @@ async function runSearch() {
           <button onclick="playTrackIdx(${idx}, true, this)">🎬 Video</button>
           <button onclick="saveSearchTrack(${idx}, this)">❤️ Save</button>
         </div>
-      </div>
-    `).join("");
+      </div>`;
+    }).join("");
   } catch (e) {
     out.innerHTML = `<div class="empty">${esc(e.message)}</div>`;
   }
@@ -836,7 +838,7 @@ function renderLibrary() {
       <div class="q-item-title">${esc(tr.title)} <span style="color:var(--muted);font-size:0.74rem;">(${esc(tr.duration)})</span></div>
       <div class="q-acts">
         <button class="q-mini primary" onclick="playSavedIdx(${idx}, this)">▶</button>
-        <button class="q-mini" onclick="removeSavedVid('${esc(tr.vidid)}')">✕</button>
+        <button class="q-mini" onclick="removeSavedIdx(${idx})">✕</button>
       </div>
     </div>`
   ).join("");
@@ -850,9 +852,11 @@ async function loadLibrary() {
   } catch (e) {}
 }
 
-async function removeSavedVid(vidid) {
+async function removeSavedIdx(idx) {
+  const tr = state.library[idx];
+  if (!tr || !tr.vidid) return;
   try {
-    const res = await api("/api/playlists/delete", { method: "POST", body: JSON.stringify({ vidid }) });
+    const res = await api("/api/playlists/delete", { method: "POST", body: JSON.stringify({ vidid: tr.vidid }) });
     state.library = res.tracks || [];
     renderLibrary();
     showToast("Removed from Library");

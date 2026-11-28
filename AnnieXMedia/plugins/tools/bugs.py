@@ -13,7 +13,8 @@ from AnnieXMedia import app
 
 
 def extract_bug_content(msg: Message) -> str | None:
-    return msg.text.split(None, 1)[1] if msg.text and " " in msg.text else None
+    raw = (msg.text or msg.caption or "").strip()
+    return raw.split(None, 1)[1].strip() if " " in raw else None
 
 
 def escape_md(text: str) -> str:

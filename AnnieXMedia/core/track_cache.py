@@ -144,14 +144,21 @@ async def download_from_tg_cache(vidid: str, is_video: bool = False, title: str 
         return None
 
     key = _cache_key(vid, is_video)
+    existing_fut: Optional[asyncio.Future] = None
     async with _inflight_lock:
-        if existing_fut := _tg_inflight.get(key):
-            try:
-                return await existing_fut
-            except BaseException:
-                return None
-        fut = asyncio.get_running_loop().create_future()
-        _tg_inflight[key] = fut
+        if key in _tg_inflight:
+            existing_fut = _tg_inflight[key]
+        else:
+            fut = asyncio.get_running_loop().create_future()
+            _tg_inflight[key] = fut
+
+    if existing_fut is not None:
+        try:
+            return await existing_fut
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            return None
 
     result_path: Optional[str] = None
     try:

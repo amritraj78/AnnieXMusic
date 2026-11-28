@@ -1,5 +1,6 @@
 # Authored By Certified Coders © 2025
 import asyncio
+import html
 import random
 import string
 
@@ -81,6 +82,9 @@ async def play_command(
         message.from_user.first_name
         if message.from_user and message.from_user.first_name
         else (message.chat.title or "Admin")
+    )
+    requester_mention = (
+        message.from_user.mention if message.from_user else html.escape(user_name)
     )
 
     audio_telegram = (
@@ -261,7 +265,7 @@ async def play_command(
 
                 plist_type = "spplay"
                 img = config.SPOTIFY_PLAYLIST_IMG_URL
-                cap = _["play_11"].format(app.mention, message.from_user.mention)
+                cap = _["play_11"].format(app.mention, requester_mention)
                 internal_type = "playlist"
                 log_label = "Spotify playlist"
 
@@ -275,7 +279,7 @@ async def play_command(
 
                 plist_type = "spalbum"
                 img = config.SPOTIFY_ALBUM_IMG_URL
-                cap = _["play_11"].format(app.mention, message.from_user.mention)
+                cap = _["play_11"].format(app.mention, requester_mention)
                 internal_type = "playlist"
                 log_label = "Spotify album"
 
@@ -289,7 +293,7 @@ async def play_command(
 
                 plist_type = "spartist"
                 img = config.SPOTIFY_ARTIST_IMG_URL
-                cap = _["play_11"].format(app.mention, message.from_user.mention)
+                cap = _["play_11"].format(app.mention, requester_mention)
                 internal_type = "playlist"
                 log_label = "Spotify artist"
 
@@ -321,7 +325,7 @@ async def play_command(
 
                 plist_type = "apple"
                 img = config.PLAYLIST_IMG_URL
-                cap = _["play_12"].format(app.mention, message.from_user.mention)
+                cap = _["play_12"].format(app.mention, requester_mention)
                 internal_type = "playlist"
                 log_label = "Apple Music playlist"
 
@@ -588,6 +592,8 @@ async def play_command(
 @capture_callback_err
 async def play_music(client, CallbackQuery, _):
     try:
+        if not CallbackQuery.from_user or not CallbackQuery.data:
+            return await CallbackQuery.answer()
         callback_data = CallbackQuery.data.split(None, 1)[1]
         vidid, user_id, mode, cplay, fplay = callback_data.split("|")
 
@@ -685,6 +691,8 @@ async def anonymous_check(client, CallbackQuery):
 @capture_callback_err
 async def play_playlists_command(client, CallbackQuery, _):
     try:
+        if not CallbackQuery.from_user or not CallbackQuery.data:
+            return await CallbackQuery.answer()
         callback_data = CallbackQuery.data.split(None, 1)[1]
         videoid, user_id, ptype, mode, cplay, fplay = callback_data.split("|")
 
@@ -782,6 +790,8 @@ async def play_playlists_command(client, CallbackQuery, _):
 @capture_callback_err
 async def slider_queries(client, CallbackQuery, _):
     try:
+        if not CallbackQuery.from_user or not CallbackQuery.data:
+            return await CallbackQuery.answer()
         callback_data = CallbackQuery.data.split(None, 1)[1]
         what, rtype, query_tok, user_id, cplay, fplay = callback_data.split("|")
         real_query = lyrical.get(query_tok, query_tok)

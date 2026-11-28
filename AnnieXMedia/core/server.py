@@ -142,6 +142,10 @@ async def _handle_request(reader: asyncio.StreamReader, writer: asyncio.StreamWr
         if not parsed:
             return
         method, path, query_str, headers, body_bytes = parsed
+        headers.pop("x-client-ip", None)
+        peer = writer.get_extra_info("peername")
+        if isinstance(peer, tuple) and peer:
+            headers["x-client-ip"] = str(peer[0])
 
         if path == "__TOO_LARGE__":
             resp = _send_response_bytes(
