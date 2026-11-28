@@ -26,6 +26,7 @@ from pyrogram.types import (
 from pyrogram.enums import ChatMemberStatus, ChatMembersFilter
 
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.utils.permissions import is_owner_or_sudoer, mention
 
 MASS_CMDS = ["kickall", "banall", "unbanall", "muteall", "unmuteall", "unpinall"]
@@ -126,7 +127,7 @@ async def handle_mass_confirm(client: Client, callback: CallbackQuery):
         finally:
             _active_mass_chats.discard(chat_id)
 
-    asyncio.create_task(_run_job())
+    spawn_task(_run_job(), name=f"mass_{cmd}")
 
 
 # ─────────────────────────────────────────────────────

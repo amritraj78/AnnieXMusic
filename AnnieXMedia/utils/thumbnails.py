@@ -48,7 +48,8 @@ def trim_to_width(text: str, font: ImageFont.FreeTypeFont, max_w: int) -> str:
 
 
 def _process_image(thumb_path: str, cache_path: str, title: str, views: str, is_live: bool, duration_text: str):
-    base = Image.open(thumb_path).resize((1280, 720)).convert("RGBA")
+    with Image.open(thumb_path) as _src_img:
+        base = _src_img.resize((1280, 720)).convert("RGBA")
     bg = ImageEnhance.Brightness(base.filter(ImageFilter.BoxBlur(10))).enhance(0.6)
 
     # Frosted glass panel
@@ -87,12 +88,18 @@ def _process_image(thumb_path: str, cache_path: str, title: str, views: str, is_
     # Icons
     icons_path = "AnnieXMedia/assets/thumb/play_icons.png"
     if os.path.isfile(icons_path):
-        ic = Image.open(icons_path).resize((ICONS_W, ICONS_H)).convert("RGBA")
+        with Image.open(icons_path) as _ic_src:
+            ic = _ic_src.resize((ICONS_W, ICONS_H)).convert("RGBA")
         r, g, b, a = ic.split()
         black_ic = Image.merge("RGBA", (r.point(lambda *_: 0), g.point(lambda *_: 0), b.point(lambda *_: 0), a))
         bg.paste(black_ic, (ICONS_X, ICONS_Y), black_ic)
+        ic.close()
+        black_ic.close()
 
-    bg.save(cache_path)
+    try:
+        bg.save(cache_path)
+    finally:
+        bg.close()
 
 
 async def get_thumb(videoid: str) -> str:

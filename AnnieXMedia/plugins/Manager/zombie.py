@@ -14,6 +14,7 @@ from pyrogram.types import (
 )
 
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.misc import SUDOERS
 from AnnieXMedia.utils.admin_check import is_admin
 
@@ -282,7 +283,7 @@ async def clean_zombies_channel(_: Client, cq: CallbackQuery):
             chatQueue.discard(chat_id)
             stopProcess.pop(chat_id, None)
 
-    asyncio.create_task(_worker())
+    spawn_task(_worker(), name="zombie_cleanup")
 
 @app.on_callback_query(filters.regex(r"^clean_bots:"))
 async def clean_bots_channel(_: Client, cq: CallbackQuery):
@@ -362,7 +363,7 @@ async def clean_bots_channel(_: Client, cq: CallbackQuery):
             chatQueue.discard(chat_id)
             stopProcess.pop(chat_id, None)
 
-    asyncio.create_task(_worker())
+    spawn_task(_worker(), name="zombie_cleanup")
 
 @app.on_callback_query(filters.regex(r"^close_panel:"))
 async def close_panel(_: Client, cq: CallbackQuery):
@@ -446,7 +447,7 @@ async def execute_zombie_cleanup(_: Client, cq: CallbackQuery):
             chatQueue.discard(chat_id)
             stopProcess.pop(chat_id, None)
 
-    asyncio.create_task(_worker())
+    spawn_task(_worker(), name="zombie_cleanup")
 
 @app.on_callback_query(filters.regex(r"^cancel_zombies$"))
 async def cancel_zombie_cleanup(_: Client, cq: CallbackQuery):

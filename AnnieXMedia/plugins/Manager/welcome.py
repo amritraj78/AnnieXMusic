@@ -41,7 +41,8 @@ last_messages: OrderedDict[int, list] = OrderedDict()
 
 @lru_cache(maxsize=1)
 def cached_bg():
-    return Image.open(BG_PATH).convert("RGBA")
+    with Image.open(BG_PATH) as raw_bg:
+        return raw_bg.convert("RGBA")
 
 @lru_cache(maxsize=2)
 def cached_font(size=65):
@@ -52,23 +53,30 @@ def circle(im, size=(835, 839)):
     mask = Image.new("L", size, 0)
     ImageDraw.Draw(mask).ellipse((0, 0, *size), fill=255)
     im.putalpha(mask)
+    mask.close()
     return im
 
 def build_pic(av, fn, uid, un):
     os.makedirs("downloads", exist_ok=True)
     bg = cached_bg().copy()
-    with Image.open(av) as raw_avatar:
-        avatar = circle(raw_avatar)
-    bg.paste(avatar, (1887, 390), avatar)
-    d = ImageDraw.Draw(bg)
-    f = cached_font()
-    d.text((421, 715), fn, fill=(242, 242, 242), font=f)
-    d.text((270, 1005), str(uid), fill=(242, 242, 242), font=f)
-    d.text((570, 1308), un, fill=(242, 242, 242), font=f)
-    tok = uuid.uuid4().hex[:8]
-    path = f"downloads/welcome_{uid}_{tok}.png"
-    bg.save(path)
-    return path
+    avatar = None
+    try:
+        with Image.open(av) as raw_avatar:
+            avatar = circle(raw_avatar)
+        bg.paste(avatar, (1887, 390), avatar)
+        d = ImageDraw.Draw(bg)
+        f = cached_font()
+        d.text((421, 715), fn, fill=(242, 242, 242), font=f)
+        d.text((270, 1005), str(uid), fill=(242, 242, 242), font=f)
+        d.text((570, 1308), un, fill=(242, 242, 242), font=f)
+        tok = uuid.uuid4().hex[:8]
+        path = f"downloads/welcome_{uid}_{tok}.png"
+        bg.save(path)
+        return path
+    finally:
+        if avatar is not None:
+            avatar.close()
+        bg.close()
 
 async def safe_send(func, *args, **kwargs):
     try:

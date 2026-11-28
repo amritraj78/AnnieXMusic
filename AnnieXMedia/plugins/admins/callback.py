@@ -18,6 +18,7 @@ from config import (
 from strings import get_string
 from AnnieXMedia import YouTube, app
 from AnnieXMedia.core.call import StreamController
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.misc import db
 from AnnieXMedia.utils.database import (
     get_active_chats,
@@ -468,8 +469,14 @@ async def handle_seek(callback: CallbackQuery, _, chat_id: int, command: str, us
 
 async def markup_timer():
     while True:
-        await asyncio.sleep(6)
-        active_chats = await get_active_chats()
+        try:
+            await asyncio.sleep(6)
+            active_chats = await get_active_chats()
+        except asyncio.CancelledError:
+            raise
+        except Exception:
+            await asyncio.sleep(4)
+            continue
         for chat_id in active_chats:
             try:
                 if not await is_music_playing(chat_id):
@@ -507,7 +514,7 @@ async def markup_timer():
 
 
 try:
-    asyncio.get_running_loop().create_task(markup_timer())
+    spawn_task(markup_timer(), name="markup_timer")
 except RuntimeError:
     pass
 

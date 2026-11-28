@@ -6,6 +6,7 @@ from pyrogram.enums import ChatMembersFilter
 from pyrogram.errors import FloodWait
 
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.misc import SUDOERS
 from AnnieXMedia.utils.database import (
     get_active_chats,
@@ -164,11 +165,14 @@ async def braodcast_message(client, message, _):
 
 
 async def auto_clean():
-    while not await asyncio.sleep(10):
+    while True:
         try:
+            await asyncio.sleep(10)
             served_chats = await get_active_chats()
             for chat_id in served_chats:
-                if chat_id not in adminlist:
+                if chat_id in adminlist:
+                    continue
+                try:
                     new_admins = []
                     async for user in app.get_chat_members(
                         chat_id, filter=ChatMembersFilter.ADMINISTRATORS
@@ -181,11 +185,15 @@ async def auto_clean():
                         user_id = await alpha_to_int(user)
                         new_admins.append(user_id)
                     adminlist[chat_id] = new_admins
+                except Exception:
+                    continue
+        except asyncio.CancelledError:
+            raise
         except Exception:
-            continue
+            await asyncio.sleep(5)
 
 
 try:
-    asyncio.get_running_loop().create_task(auto_clean())
+    spawn_task(auto_clean(), name="broadcast_auto_clean")
 except RuntimeError:
     pass

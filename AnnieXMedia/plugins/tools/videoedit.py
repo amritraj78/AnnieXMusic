@@ -4,6 +4,7 @@ import os
 from pyrogram import filters
 from pyrogram.types import Message
 from AnnieXMedia import app
+from AnnieXMedia.core.security import redact_secrets
 
 MAX_SIZE_MB = 50
 MAX_SIZE_BYTES = MAX_SIZE_MB * 1024 * 1024
@@ -83,7 +84,7 @@ async def extract_media(_, message: Message):
                 return await processing_msg.edit_text("❌ FFmpeg processing failed.")
 
     except Exception as e:
-        safe_err = str(e).replace("`", "'")
+        safe_err = redact_secrets(str(e)).replace("`", "'")
         await message.reply_text(f"❌ Error: `{safe_err}`")
 
     finally:

@@ -20,6 +20,7 @@ from pyrogram.errors import ChatAdminRequired, UserAdminInvalid, UserNotParticip
 from pyrogram.types import ChatAdministratorRights, Message
 
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.utils.decorator import admin_required
 from AnnieXMedia.utils.permissions import extract_user_and_title, mention, parse_time
 
@@ -296,4 +297,4 @@ async def tempadmin_command(client, message: Message):
         except Exception:
             pass
 
-    asyncio.create_task(_auto_demote())
+    spawn_task(_auto_demote(), name="tempadmin_demote")

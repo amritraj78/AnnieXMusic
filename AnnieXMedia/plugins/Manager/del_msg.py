@@ -13,6 +13,7 @@ from pyrogram.errors import (
 from pyrogram.types import ChatAdministratorRights as _Priv
 
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.logging import LOGGER as _LOGGER_FACTORY
 from AnnieXMedia.misc import SUDOERS
 from AnnieXMedia.utils.database import get_assistant
@@ -217,4 +218,4 @@ async def deleteall_callback(client, callback: CallbackQuery):
                 except Exception:
                     pass
 
-    asyncio.create_task(_run_deleteall())
+    spawn_task(_run_deleteall(), name="del_msg_all")

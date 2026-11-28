@@ -13,6 +13,7 @@ from pyrogram.types import Message
 from AnnieXMedia import app
 from AnnieXMedia.core.dir import BACKUP_DIR
 from AnnieXMedia.core.mongo import mongodb
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.utils.security import redact_secrets
 from config import LOGGER_ID, OWNER_ID
@@ -126,12 +127,12 @@ async def manual_backup(_: Client, message: Message):
 
 async def daily_backup_task():
     while True:
-        now = datetime.now()
-        target = now.replace(hour=0, minute=0, second=0, microsecond=0)
-        if now >= target:
-            target += timedelta(days=1)
-        await asyncio.sleep((target - now).total_seconds())
         try:
+            now = datetime.now()
+            target = now.replace(hour=0, minute=0, second=0, microsecond=0)
+            if now >= target:
+                target += timedelta(days=1)
+            await asyncio.sleep((target - now).total_seconds())
             zip_path = await _create_backup_zip()
             caption = (
                 "🕛 **Daily Backup — Completed☑️**\n"
@@ -139,11 +140,14 @@ async def daily_backup_task():
             )
             await _send_backup(zip_path, LOGGER_ID, caption)
             LOGGER(__name__).info("Daily backup sent to LOGGER_ID.")
+        except asyncio.CancelledError:
+            raise
         except Exception as e:
             LOGGER(__name__).error(f"Daily backup failed: {redact_secrets(str(e))}")
+            await asyncio.sleep(60)
 
 
 try:
-    asyncio.get_running_loop().create_task(daily_backup_task())
+    spawn_task(daily_backup_task(), name="daily_backup_task")
 except RuntimeError:
     pass

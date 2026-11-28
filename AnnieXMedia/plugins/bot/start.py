@@ -11,6 +11,7 @@ from youtubesearchpython.aio import VideosSearch
 
 import config
 from AnnieXMedia import app
+from AnnieXMedia.core.tasks import spawn_task
 from AnnieXMedia.logging import LOGGER
 from AnnieXMedia.misc import _boot_
 from AnnieXMedia.plugins.sudo.sudoers import sudoers_list
@@ -167,7 +168,7 @@ async def start_pm(client, message: Message, _):
     out = private_panel(_)
     try:
         sticker_message = await message.reply_sticker(sticker=random.choice(STICKERS))
-        asyncio.create_task(delete_sticker_after_delay(sticker_message, 2))
+        spawn_task(delete_sticker_after_delay(sticker_message, 2), name="delete_start_sticker")
     except Exception:
         pass
 
