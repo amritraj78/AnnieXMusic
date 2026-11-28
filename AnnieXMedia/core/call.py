@@ -30,6 +30,7 @@ from AnnieXMedia.utils.database import (
     set_loop,
 )
 from AnnieXMedia.core.prefetch import queue_smart_autoplay_track, record_played_track
+from AnnieXMedia.core.security import redact_secrets
 from AnnieXMedia.core.track_cache import is_valid_vidid
 from AnnieXMedia.utils.exceptions import AssistantErr
 from AnnieXMedia.utils.formatters import check_duration, seconds_to_min, speed_converter
@@ -88,6 +89,7 @@ class Call:
         self._clients_built = False
         self.active_calls: set[int] = set()
         self._locks: dict[int, asyncio.Lock] = {}
+        self._bg_tasks: set[asyncio.Task] = set()
 
     def _ensure_clients(self) -> None:
         if self._clients_built:
@@ -137,7 +139,9 @@ class Call:
                 finally:
                     self.active_calls.discard(chat_id)
             return
-        asyncio.create_task(self.play(client, chat_id))
+        task = asyncio.create_task(self.play(client, chat_id))
+        self._bg_tasks.add(task)
+        task.add_done_callback(self._bg_tasks.discard)
 
 
     @capture_internal_err
@@ -722,16 +726,20 @@ class Call:
         )
 
         async def unified_update_handler(client, update: Update) -> None:
-            if isinstance(update, StreamEnded):
-                if update.stream_type in (StreamEnded.Type.AUDIO, StreamEnded.Type.VIDEO):
-                    assistant = await group_assistant(self, update.chat_id)
-                    await self.play(assistant, update.chat_id)
-            
-            elif isinstance(update, ChatUpdate):
-                status = update.status
-                if (status & ChatUpdate.Status.LEFT_CALL) or (status & CRITICAL):
-                    await self.stop_stream(update.chat_id)
-                    return
+            try:
+                if isinstance(update, StreamEnded):
+                    if update.stream_type in (StreamEnded.Type.AUDIO, StreamEnded.Type.VIDEO):
+                        assistant = await group_assistant(self, update.chat_id)
+                        await self.play(assistant, update.chat_id)
+                elif isinstance(update, ChatUpdate):
+                    status = update.status
+                    if (status & ChatUpdate.Status.LEFT_CALL) or (status & CRITICAL):
+                        await self.stop_stream(update.chat_id)
+                        return
+            except Exception as exc:
+                LOGGER(__name__).warning(
+                    f"PyTgCalls update recovery for {getattr(update, 'chat_id', '?')}: {redact_secrets(str(exc))[:180]}"
+                )
 
         for assistant in assistants:
             assistant.on_update()(unified_update_handler)

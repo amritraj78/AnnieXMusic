@@ -67,7 +67,7 @@ SUPPORT_CHAT = getenv("SUPPORT_CHAT") or "https://t.me/amrit_feel"
 AUTO_LEAVING_ASSISTANT = getenv("AUTO_LEAVING_ASSISTANT", "False").strip().lower() in ("true", "1", "yes")
 AUTO_LEAVE_ASSISTANT_TIME = _env_int("ASSISTANT_LEAVE_TIME", 3600)
 AUTOPLAY_DEFAULT = getenv("AUTOPLAY_DEFAULT", "True").strip().lower() in ("true", "1", "yes")
-KEEP_ALIVE_INTERVAL = max(60, _env_int("KEEP_ALIVE_INTERVAL", 240))
+KEEP_ALIVE_INTERVAL = max(60, _env_int("KEEP_ALIVE_INTERVAL", 180))
 SELF_HEAL_INTERVAL = max(20, _env_int("SELF_HEAL_INTERVAL", 45))
 
 # ── Debug ──────────────────────────────────────────────────────────────────────

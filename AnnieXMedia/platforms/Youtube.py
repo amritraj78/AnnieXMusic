@@ -36,6 +36,14 @@ _formats_cache: Dict[str, Tuple[float, List[Dict], str]] = {}
 _formats_lock = asyncio.Lock()
 
 
+async def clear_youtube_caches() -> None:
+    """Reset in-memory YouTube search and format caches during error recovery."""
+    async with _cache_lock:
+        _cache.clear()
+    async with _formats_lock:
+        _formats_cache.clear()
+
+
 # === Constants ===
 YOUTUBE_ID_RE = re.compile(r"^[a-zA-Z0-9_-]{11}$")
 

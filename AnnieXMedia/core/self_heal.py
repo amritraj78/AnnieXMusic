@@ -214,30 +214,40 @@ async def _heal_calls_and_queues() -> None:
         else:
             _overtime_since.pop(cid, None)
 
-    # Prune stale tracking keys for chats no longer active
+    # Prune stale tracking keys & orphaned empty queue buckets for inactive chats
     for cid in list(_ghost_ticks.keys()):
         if cid not in active_ids:
             _ghost_ticks.pop(cid, None)
     for cid in list(_overtime_since.keys()):
         if cid not in active_ids:
             _overtime_since.pop(cid, None)
+    for cid in list(db.keys()):
+        if cid not in active_ids and db.get(cid) == []:
+            db.pop(cid, None)
 
 
-async def _refresh_cookies_if_needed() -> None:
+async def _refresh_cookies_and_caches_if_needed() -> None:
     global _last_cookie_refresh_ts, _download_failures
-    if not config.COOKIE_URL:
-        return
     now = time.time()
-    due_periodic = (now - _last_cookie_refresh_ts) >= _COOKIE_REFRESH_SEC
     due_errors = _download_failures >= 3 and (now - _last_cookie_refresh_ts) >= _COOKIE_ERR_COOLDOWN
-    if not (due_periodic or due_errors):
+    due_periodic = bool(config.COOKIE_URL) and (now - _last_cookie_refresh_ts) >= _COOKIE_REFRESH_SEC
+
+    if due_errors:
+        _download_failures = 0
+        with contextlib.suppress(Exception):
+            from AnnieXMedia.platforms.Youtube import clear_youtube_caches
+
+            await clear_youtube_caches()
+            health_state["recoveries"] += 1
+            log.info("🛡️ Cleared YouTube extractor/metadata caches after repeated download errors.")
+
+    if not config.COOKIE_URL or not (due_periodic or due_errors):
         return
     try:
         from AnnieXMedia.utils.cookie_handler import fetch_and_store_cookies
 
         await fetch_and_store_cookies()
         _last_cookie_refresh_ts = now
-        _download_failures = 0
         health_state["cookie_refreshes"] += 1
         log.info("🛡️ YouTube cookies refreshed automatically.")
     except Exception as exc:
@@ -245,8 +255,36 @@ async def _refresh_cookies_if_needed() -> None:
         log.debug(f"🛡️ Cookie auto-refresh skipped: {redact_secrets(str(exc))[:160]}")
 
 
+async def _check_and_heal_runtime_services() -> None:
+    """Verify web server & core background tasks remain alive and restart if stopped."""
+    from AnnieXMedia.core import server
+
+    if server._server is None or not server._server.is_serving():
+        log.warning("🛡️ Web server stopped unexpectedly; restarting HTTP server...")
+        if await server.start_web_server():
+            health_state["recoveries"] += 1
+
+    try:
+        from AnnieXMedia.plugins.misc.seeker import ensure_timer_running
+
+        if ensure_timer_running():
+            health_state["recoveries"] += 1
+            log.info("🛡️ Restarted playback seeker timer task.")
+    except Exception:
+        pass
+
+    try:
+        from AnnieXMedia.plugins.misc.autoleave import ensure_autoleave_tasks
+
+        if ensure_autoleave_tasks():
+            health_state["recoveries"] += 1
+            log.info("🛡️ Restarted autoleave/autoend background tasks.")
+    except Exception:
+        pass
+
+
 async def run_heal_cycle() -> None:
-    """Execute one non-blocking self-healing pass across DB, clients, calls, cookies, and disk."""
+    """Execute one non-blocking self-healing pass across DB, clients, services, calls, cookies, and disk."""
     global _last_prune_ts
     health_state["last_check_at"] = int(time.time())
 
@@ -261,9 +299,11 @@ async def run_heal_cycle() -> None:
     await _check_and_heal_bot()
     await _check_and_heal_assistants()
     with contextlib.suppress(Exception):
+        await _check_and_heal_runtime_services()
+    with contextlib.suppress(Exception):
         await _heal_calls_and_queues()
     with contextlib.suppress(Exception):
-        await _refresh_cookies_if_needed()
+        await _refresh_cookies_and_caches_if_needed()
 
     now = time.time()
     if now - _last_prune_ts >= 600:
@@ -274,17 +314,20 @@ async def run_heal_cycle() -> None:
 
 async def _watchdog_loop() -> None:
     interval = max(20, int(getattr(config, "SELF_HEAL_INTERVAL", 45)))
+    await asyncio.sleep(5)
     while True:
-        await asyncio.sleep(interval)
         try:
             await run_heal_cycle()
+        except asyncio.CancelledError:
+            raise
         except Exception as exc:
             health_state["last_error"] = redact_secrets(str(exc))[:200]
             log.warning(f"🛡️ Self-heal loop iteration error: {health_state['last_error']}")
+        await asyncio.sleep(interval)
 
 
 async def _keep_alive_loop() -> None:
-    interval = max(60, int(getattr(config, "KEEP_ALIVE_INTERVAL", 240)))
+    interval = max(60, int(getattr(config, "KEEP_ALIVE_INTERVAL", 180)))
     try:
         port = int(os.environ.get("PORT", "8080"))
     except ValueError:
@@ -298,14 +341,27 @@ async def _keep_alive_loop() -> None:
             session = await get_http_session()
             async with session.get(local_url, timeout=aiohttp.ClientTimeout(total=8)) as resp:
                 ok_local = resp.status == 200
+            if not ok_local:
+                from AnnieXMedia.core import server
+
+                await server.start_web_server()
+                health_state["recoveries"] += 1
             if public_url and await is_safe_http_url(public_url):
                 with contextlib.suppress(Exception):
                     async with session.get(public_url, timeout=aiohttp.ClientTimeout(total=10)):
                         pass
             health_state["last_keepalive_ok"] = ok_local
             health_state["last_keepalive_at"] = int(time.time())
+        except asyncio.CancelledError:
+            raise
         except Exception:
             health_state["last_keepalive_ok"] = False
+            with contextlib.suppress(Exception):
+                from AnnieXMedia.core import server
+
+                if server._server is None or not server._server.is_serving():
+                    await server.start_web_server()
+                    health_state["recoveries"] += 1
 
 
 def start_self_heal() -> None:

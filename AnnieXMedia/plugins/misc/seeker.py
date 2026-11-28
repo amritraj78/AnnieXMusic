@@ -1,9 +1,13 @@
 # Authored By Certified Coders © 2025
 import asyncio
 
+from typing import Optional
+
 from AnnieXMedia.core.prefetch import schedule_prefetch_next
 from AnnieXMedia.misc import db
 from AnnieXMedia.utils.database import get_active_chats, is_music_playing
+
+_timer_task: Optional[asyncio.Task] = None
 
 
 async def timer():
@@ -29,11 +33,22 @@ async def timer():
                 remaining = duration - played
                 if 0 < remaining <= 22 and len(playing) >= 2:
                     schedule_prefetch_next(chat_id)
+        except asyncio.CancelledError:
+            raise
         except Exception:
             continue
 
 
-try:
-    asyncio.get_running_loop().create_task(timer())
-except RuntimeError:
-    pass
+def ensure_timer_running() -> bool:
+    """Start or restart the playback seeker task if not alive. Return True if started."""
+    global _timer_task
+    if _timer_task is not None and not _timer_task.done():
+        return False
+    try:
+        _timer_task = asyncio.get_running_loop().create_task(timer(), name="seeker-timer")
+        return True
+    except RuntimeError:
+        return False
+
+
+ensure_timer_running()

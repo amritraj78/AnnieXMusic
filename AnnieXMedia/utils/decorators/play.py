@@ -31,6 +31,7 @@ from AnnieXMedia.utils.inline import botplaylist_markup
 # Cache for invite links per chat and lightweight per-user cooldown
 links = {}
 _play_cooldown: Dict[Tuple[int, int], float] = {}
+_bg_tasks: set[asyncio.Task] = set()
 _PLAY_COOLDOWN_SEC = 2.5
 
 
@@ -73,7 +74,9 @@ def PlayWrapper(command):
             last_ts = _play_cooldown.get(key, 0.0)
             if now - last_ts < _PLAY_COOLDOWN_SEC:
                 warn = await message.reply_text("⏳ Please wait a couple seconds before queueing another track.")
-                asyncio.create_task(_delete_after(warn, 4.0))
+                t = asyncio.create_task(_delete_after(warn, 4.0))
+                _bg_tasks.add(t)
+                t.add_done_callback(_bg_tasks.discard)
                 return
             if len(_play_cooldown) > 2048:
                 cutoff = now - 60.0
@@ -281,6 +284,8 @@ def PlayWrapper(command):
                     )
 
                 if invitelink:
+                    if len(links) > 2048:
+                        links.clear()
                     links[chat_id] = invitelink
 
                 try:

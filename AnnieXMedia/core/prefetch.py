@@ -34,6 +34,7 @@ _MAX_AUTOPLAY_CHATS = 1024
 _recent_vidids: Dict[int, Deque[str]] = {}
 _last_tracks: Dict[int, Dict[str, Any]] = {}
 _prefetch_inflight: set[tuple[int, str]] = set()
+_prefetch_tasks: set[asyncio.Task] = set()
 _autoplay_locks: Dict[int, asyncio.Lock] = {}
 
 
@@ -131,7 +132,9 @@ def schedule_prefetch_next(chat_id: int) -> None:
         return
     _prefetch_inflight.add(key)
     try:
-        asyncio.get_running_loop().create_task(_prefetch_worker(chat_id, vid, nxt))
+        task = asyncio.get_running_loop().create_task(_prefetch_worker(chat_id, vid, nxt))
+        _prefetch_tasks.add(task)
+        task.add_done_callback(_prefetch_tasks.discard)
     except RuntimeError:
         _prefetch_inflight.discard(key)
 

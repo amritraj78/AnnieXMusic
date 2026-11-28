@@ -28,6 +28,7 @@ _pinned_paths: Dict[str, int] = {}
 _tg_inflight: Dict[str, asyncio.Future] = {}
 _inflight_lock = asyncio.Lock()
 _uploading_keys: set[str] = set()
+_bg_tasks: set[asyncio.Task] = set()
 
 stats: Dict[str, int] = {
     "disk_hits": 0,
@@ -329,7 +330,9 @@ def schedule_cache_upload(
     pin_path(file_path)
     try:
         loop = asyncio.get_running_loop()
-        loop.create_task(_upload_worker(vid, file_path, title, duration_min, duration_sec, is_video))
+        task = loop.create_task(_upload_worker(vid, file_path, title, duration_min, duration_sec, is_video))
+        _bg_tasks.add(task)
+        task.add_done_callback(_bg_tasks.discard)
     except RuntimeError:
         _uploading_keys.discard(key)
         unpin_path(file_path)
